@@ -39,6 +39,7 @@ static opts_t g_opt = {.port = 8080, .baud = 115200, .broadcast = true, .data_di
                        .page_path = "web/index.html", .log_sectors = LOG_SECTORS};
 
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t g_persist_lock = PTHREAD_MUTEX_INITIALIZER; // orders zero writes; taken before g_lock
 static pthread_cond_t g_log_cond = PTHREAD_COND_INITIALIZER;
 
 // Everything below is guarded by g_lock.
@@ -117,11 +118,22 @@ static bool kv_set(const char *key, const uint8_t *buf, size_t len)
 
 static const char *zero_key(int ch) { return ch ? "zero1" : "zero0"; }
 
-static bool persist_zero(int ch, const zero_cfg_t *z)
+// Writes the channel's current RAM zero. Reading it under g_persist_lock means a late writer always
+// stores the newest value, so a reset can never be overwritten by an older calibration result.
+static bool persist_zero(int ch)
 {
+    pthread_mutex_lock(&g_persist_lock);
+    pthread_mutex_lock(&g_lock);
+    zero_cfg_t z = g_stand.baro[ch].zero;
+    pthread_mutex_unlock(&g_lock);
     uint8_t buf[ST_ZERO_BLOB_SIZE];
-    size_t n = st_encode_zero(z, (uint8_t)ch, buf, sizeof(buf));
-    return n && kv_set(zero_key(ch), buf, n);
+    size_t n = st_encode_zero(&z, (uint8_t)ch, buf, sizeof(buf));
+    bool ok = n && kv_set(zero_key(ch), buf, n);
+    pthread_mutex_lock(&g_lock);
+    stand_zero_persisted(&g_stand, ch, ok);
+    pthread_mutex_unlock(&g_lock);
+    pthread_mutex_unlock(&g_persist_lock);
+    return ok;
 }
 
 // --- Sensor task --------------------------------------------------------------------------------
@@ -140,14 +152,14 @@ static void *sensor_task(void *arg)
         uint32_t t = now_ms();
         pthread_mutex_lock(&g_lock);
         stand_event_t ev[STAND_BARO_N];
-        zero_cfg_t zc[STAND_BARO_N];
+        float p0[STAND_BARO_N];
         for (int ch = 0; ch < STAND_BARO_N; ch++) {
             // ~12 Pa per metre near sea level; slow common drift imitates weather.
             float p = 101325.0f + (ch ? 15.0f : 0.0f) - 12.0f * g_lift_m +
                       3.0f * sinf((float)t / 600000.0f) + g_noise_pa * gauss();
             ev[ch] = g_fail[ch] ? stand_baro_sample(&g_stand, ch, SS_NOT_FOUND, NAN, t)
                                 : stand_baro_sample(&g_stand, ch, SS_OK, p, t);
-            zc[ch] = g_stand.baro[ch].zero;
+            p0[ch] = g_stand.baro[ch].zero.p0_pa;
         }
         if ((int32_t)(t - next_sonar) >= 0) {
             next_sonar = t + 60;
@@ -166,11 +178,8 @@ static void *sensor_task(void *arg)
         // Persist outside the lock, like the firmware's storage task.
         for (int ch = 0; ch < STAND_BARO_N; ch++) {
             if (ev[ch] == STAND_EV_ZERO_DONE) {
-                bool ok = persist_zero(ch, &zc[ch]);
-                pthread_mutex_lock(&g_lock);
-                stand_zero_persisted(&g_stand, ch, ok);
-                pthread_mutex_unlock(&g_lock);
-                printf("[baro%d] zero set p0=%.2f Pa, persist %s\n", ch, zc[ch].p0_pa, ok ? "ok" : "FAILED");
+                bool ok = persist_zero(ch);
+                printf("[baro%d] zero set p0=%.2f Pa, persist %s\n", ch, p0[ch], ok ? "ok" : "FAILED");
             } else if (ev[ch] == STAND_EV_ZERO_FAILED) {
                 printf("[baro%d] zero failed, previous kept\n", ch);
             }
@@ -194,9 +203,17 @@ static void *logger_task(void *arg)
             pthread_mutex_unlock(&g_lock);
             sleep_ms(500); // the real erase of 64 sectors takes seconds
             pthread_mutex_lock(&g_lock);
-            histlog_clear(&g_log);
+            int err = histlog_clear(&g_log);
             g_log_clearing = false;
-            printf("[log] cleared\n");
+            if (err) {
+                printf("[log] clear FAILED (%d), rescanning\n", err);
+                uint32_t errors = g_log.write_errors; // open() resets counters; keep the history
+                histlog_open(&g_log, &g_flash_ops, g_log.n_sectors); // true state after a partial erase
+                g_log.write_errors = errors;
+                g_log.last_error = err;
+            } else {
+                printf("[log] cleared\n");
+            }
             continue;
         }
         uint64_t t = mono_ms();
@@ -285,11 +302,7 @@ static bool be_zero_reset(void *ctx, int ch)
     bool ok = stand_zero_reset(&g_stand, ch);
     pthread_mutex_unlock(&g_lock);
     if (ok) {
-        zero_cfg_t z = {.set = false};
-        bool saved = persist_zero(ch, &z);
-        pthread_mutex_lock(&g_lock);
-        stand_zero_persisted(&g_stand, ch, saved);
-        pthread_mutex_unlock(&g_lock);
+        persist_zero(ch);
     }
     return ok;
 }
@@ -321,11 +334,12 @@ static bool be_log_clear(void *ctx)
     return ok;
 }
 
-static size_t be_log_read(void *ctx, uint32_t before, hl_record_t *out, size_t max)
+static size_t be_log_read(void *ctx, uint32_t before, hl_record_t *out, size_t max, uint32_t *next_before)
 {
     (void)ctx;
     pthread_mutex_lock(&g_lock);
-    size_t n = g_log_clearing ? 0 : histlog_read_recent(&g_log, before, out, max);
+    *next_before = HL_SEQ_EMPTY;
+    size_t n = g_log_clearing ? 0 : histlog_read_recent(&g_log, before, out, max, next_before);
     pthread_mutex_unlock(&g_lock);
     return n;
 }
@@ -358,6 +372,7 @@ static void net_apply(const netcfg_t *cfg)
 
 // --- Bridge emulation ---------------------------------------------------------------------------
 
+static http_parser_t g_parser;
 static int g_clients[MAX_CLIENTS];
 static int g_reply_to = -1; // direct mode: client whose bytes completed the request
 
@@ -366,8 +381,12 @@ static void drop_client(int i)
     close(g_clients[i]);
     g_clients[i] = -1;
     pthread_mutex_lock(&g_lock);
-    g_nclients--;
+    bool none_left = --g_nclients == 0;
     pthread_mutex_unlock(&g_lock);
+    // Like the module's LINK pin: only "no TCP connection at all" is visible, so reset then.
+    if (none_left) {
+        http_parser_reset(&g_parser);
+    }
 }
 
 // UART TX: throttled to the configured baud, then copied to every TCP client.
@@ -399,16 +418,27 @@ static int bridge_write(void *ctx, const void *data, size_t len)
 }
 
 static uint8_t g_page[64 * 1024];
+static size_t g_page_len;
 
-static size_t load_page(void)
+// Re-read on every page request so the UI can be edited live; keep the old copy if the file
+// is missing or would not fit, instead of serving an empty or truncated page.
+static bool load_page(void)
 {
+    static uint8_t tmp[sizeof(g_page) + 1];
     FILE *f = fopen(g_opt.page_path, "rb");
     if (!f) {
-        return 0;
+        fprintf(stderr, "[web] cannot open %s\n", g_opt.page_path);
+        return false;
     }
-    size_t n = fread(g_page, 1, sizeof(g_page), f);
+    size_t n = fread(tmp, 1, sizeof(tmp), f);
     fclose(f);
-    return n;
+    if (n == 0 || n > sizeof(g_page)) {
+        fprintf(stderr, "[web] %s is empty or larger than %zu bytes\n", g_opt.page_path, sizeof(g_page));
+        return false;
+    }
+    memcpy(g_page, tmp, n);
+    g_page_len = n;
+    return true;
 }
 
 static void *stdin_task(void *arg)
@@ -538,8 +568,7 @@ int main(int argc, char **argv)
     for (int i = 0; i < MAX_CLIENTS; i++) {
         g_clients[i] = -1;
     }
-    static http_parser_t parser;
-    http_parser_init(&parser);
+    http_parser_init(&g_parser);
     static char scratch[8192];
     api_backend_t be = {
         .snapshot = be_snapshot, .zero_start = be_zero_start, .zero_reset = be_zero_reset,
@@ -547,6 +576,10 @@ int main(int argc, char **argv)
         .http_port = (uint16_t)g_opt.port,
     };
     api_out_t out = {.write = bridge_write};
+    if (!load_page()) {
+        return 1;
+    }
+    be.page = g_page;
 
     for (;;) {
         struct pollfd pfd[MAX_CLIENTS + 1];
@@ -596,27 +629,28 @@ int main(int argc, char **argv)
             size_t off = 0;
             while (off < (size_t)got) {
                 http_event_t ev;
-                off += http_parser_feed(&parser, buf + off, (size_t)got - off, now_ms(), &ev);
+                off += http_parser_feed(&g_parser, buf + off, (size_t)got - off, now_ms(), &ev);
                 g_reply_to = i;
                 if (ev == HTTP_EV_REQUEST) {
-                    size_t plen = load_page();
-                    be.page = g_page;
-                    be.page_len = plen;
-                    api_after_t after = api_handle(&be, &parser.req, &out, scratch, sizeof(scratch));
+                    if (!strcmp(g_parser.req.path, "/") || !strcmp(g_parser.req.path, "/index.html")) {
+                        load_page();
+                    }
+                    be.page_len = g_page_len;
+                    api_after_t after = api_handle(&be, &g_parser.req, &out, scratch, sizeof(scratch));
                     if (after.net_apply) {
                         net_apply(&after.net);
                     }
                 } else if (ev == HTTP_EV_ERROR) {
-                    printf("[http] error %d\n", parser.error_status);
-                    api_send_error(&out, parser.error_status, scratch, sizeof(scratch));
+                    printf("[http] error %d\n", g_parser.error_status);
+                    api_send_error(&out, g_parser.error_status, g_parser.error_head, scratch, sizeof(scratch));
                 }
             }
         }
-        if (http_parser_tick(&parser, now_ms())) {
+        if (http_parser_tick(&g_parser, now_ms())) {
             printf("[http] incomplete request dropped (timeout)\n");
         }
         pthread_mutex_lock(&g_lock);
-        g_http_stats = parser.stats;
+        g_http_stats = g_parser.stats;
         pthread_mutex_unlock(&g_lock);
     }
 }

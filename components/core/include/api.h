@@ -62,7 +62,7 @@ typedef struct {
     bool (*zero_reset)(void *ctx, int ch);                 // false: calibration in progress
     persist_t (*log_config)(void *ctx, const log_cfg_t *cfg); // returns persist result
     bool (*log_clear)(void *ctx);                          // false: already clearing
-    size_t (*log_read)(void *ctx, uint32_t before, hl_record_t *out, size_t max);
+    size_t (*log_read)(void *ctx, uint32_t before, hl_record_t *out, size_t max, uint32_t *next_before);
     const uint8_t *page_gz;
     size_t page_gz_len;
     const uint8_t *page;
@@ -86,8 +86,8 @@ typedef struct {
 api_after_t api_handle(const api_backend_t *b, const http_request_t *req, const api_out_t *out,
                        char *scratch, size_t scratch_cap);
 
-// Replies to a parser error (400/413/431/...).
-void api_send_error(const api_out_t *out, int status, char *scratch, size_t scratch_cap);
+// Replies to a parser error (400/413/431/...); pass parser->error_head as head_only.
+void api_send_error(const api_out_t *out, int status, bool head_only, char *scratch, size_t scratch_cap);
 
 const char *api_sensor_status_code(sensor_status_t st);
 const char *api_sensor_status_text(sensor_status_t st);

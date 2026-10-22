@@ -107,8 +107,9 @@ static void send_json(const api_out_t *out, int status, jw_t *w, bool head_only)
     send(out, status, "application/json; charset=utf-8", w->buf, w->len, NULL, head_only);
 }
 
-static void send_fail(const api_out_t *out, int status, const char *code, const char *msg,
-                      char *scratch, size_t cap)
+// head_only must follow the request: a body sent to a HEAD client desyncs the shared stream.
+static void send_fail_h(const api_out_t *out, bool head_only, int status, const char *code,
+                        const char *msg, char *scratch, size_t cap)
 {
     jw_t w;
     jw_init(&w, scratch, cap);
@@ -117,7 +118,14 @@ static void send_fail(const api_out_t *out, int status, const char *code, const 
     jw_raw(&w, ",\"message\":");
     jw_str(&w, msg);
     jw_raw(&w, "}");
-    send_json(out, status, &w, false);
+    send_json(out, status, &w, head_only);
+}
+
+// POST-only handlers: the request can never be HEAD here.
+static void send_fail(const api_out_t *out, int status, const char *code, const char *msg,
+                      char *scratch, size_t cap)
+{
+    send_fail_h(out, false, status, code, msg, scratch, cap);
 }
 
 static void send_ok(const api_out_t *out, const char *msg, char *scratch, size_t cap)
@@ -130,11 +138,16 @@ static void send_ok(const api_out_t *out, const char *msg, char *scratch, size_t
     send_json(out, 200, &w, false);
 }
 
+// Address 0 is rendered as null (used for "no gateway").
 static void json_ip(jw_t *w, const char *key, uint32_t a)
 {
+    jw_printf(w, "\"%s\":", key);
+    if (a == 0) {
+        jw_raw(w, "null");
+        return;
+    }
     char ip[16];
     netcfg_format_ipv4(a, ip, sizeof(ip));
-    jw_printf(w, "\"%s\":", key);
     jw_str(w, ip);
 }
 
@@ -226,14 +239,8 @@ static void render_state(jw_t *w, const api_snapshot_t *s)
     json_ip(w, "ip", s->net.ip);
     jw_raw(w, ",");
     json_ip(w, "mask", s->net.mask);
-    jw_raw(w, ",\"gw\":");
-    if (s->net.gw) {
-        char gw[16];
-        netcfg_format_ipv4(s->net.gw, gw, sizeof(gw));
-        jw_str(w, gw);
-    } else {
-        jw_raw(w, "null");
-    }
+    jw_raw(w, ",");
+    json_ip(w, "gw", s->net.gw);
     jw_printf(w, ",\"port\":%u,\"origin\":", (unsigned)s->http_port);
     jw_str(w, origin_code(s->net_origin));
     static const char *const apply_codes[] = {"idle", "pending", "ok", "failed"};
@@ -258,7 +265,7 @@ static void render_state(jw_t *w, const api_snapshot_t *s)
               (unsigned)s->http.skipped_bytes);
 }
 
-static void render_log(jw_t *w, const hl_record_t *r, size_t n)
+static void render_log(jw_t *w, const hl_record_t *r, size_t n, uint32_t next_before)
 {
     jw_raw(w, "{\"ok\":true,\"records\":[");
     for (size_t i = 0; i < n; i++) {
@@ -283,8 +290,8 @@ static void render_log(jw_t *w, const hl_record_t *r, size_t n)
         jw_raw(w, "]}");
     }
     jw_raw(w, "],\"next_before\":");
-    if (n > 0 && r[n - 1].seq > 0) {
-        jw_printf(w, "%u", (unsigned)r[n - 1].seq);
+    if (next_before != HL_SEQ_EMPTY) {
+        jw_printf(w, "%u", (unsigned)next_before);
     } else {
         jw_raw(w, "null");
     }
@@ -312,7 +319,7 @@ api_after_t api_handle(const api_backend_t *b, const http_request_t *req, const 
 
     if (strcmp(path, "/") == 0 || strcmp(path, "/index.html") == 0) {
         if (!is_get) {
-            send_fail(out, 405, "method", "Метод не підтримується", scratch, cap);
+            send_fail_h(out, head_only, 405, "method", "Метод не підтримується", scratch, cap);
         } else if (req->accept_gzip && b->page_gz) {
             send(out, 200, "text/html; charset=utf-8", b->page_gz, b->page_gz_len,
                  "Content-Encoding: gzip\r\n", head_only);
@@ -339,22 +346,30 @@ api_after_t api_handle(const api_backend_t *b, const http_request_t *req, const 
         form_get_long(req->query, "before", 0, 0x7FFFFFFFL, &before);
         form_get_long(req->query, "limit", 1, API_LOG_PAGE_MAX, &limit);
         hl_record_t recs[API_LOG_PAGE_MAX];
-        size_t n = b->log_read(b->ctx, (uint32_t)before, recs, (size_t)limit);
+        uint32_t next = HL_SEQ_EMPTY;
+        size_t n = b->log_read(b->ctx, (uint32_t)before, recs, (size_t)limit, &next);
         jw_t w;
         jw_init(&w, scratch, cap);
-        render_log(&w, recs, n);
+        render_log(&w, recs, n, next);
         send_json(out, 200, &w, head_only);
         return after;
     }
-    if (!is_post) {
-        bool known = strcmp(path, "/api/zero") == 0 || strcmp(path, "/api/zero/reset") == 0 ||
-                     strcmp(path, "/api/log/config") == 0 || strcmp(path, "/api/log/clear") == 0 ||
-                     strcmp(path, "/api/net") == 0 || strcmp(path, "/api/state") == 0 ||
-                     strcmp(path, "/api/log") == 0;
-        if (known) {
-            send_fail(out, 405, "method", "Метод не підтримується", scratch, cap);
+    // Remaining routes are POST-only; anything else is 405 for a known path, 404 otherwise.
+    static const char *const post_routes[] = {"/api/zero", "/api/zero/reset", "/api/log/config",
+                                              "/api/log/clear", "/api/net"};
+    static const char *const get_routes[] = {"/api/state", "/api/log"};
+    bool post_route = false, get_route = false;
+    for (size_t i = 0; i < sizeof(post_routes) / sizeof(post_routes[0]); i++) {
+        post_route |= strcmp(path, post_routes[i]) == 0;
+    }
+    for (size_t i = 0; i < sizeof(get_routes) / sizeof(get_routes[0]); i++) {
+        get_route |= strcmp(path, get_routes[i]) == 0;
+    }
+    if (!post_route || !is_post) {
+        if (post_route || get_route) {
+            send_fail_h(out, head_only, 405, "method", "Метод не підтримується", scratch, cap);
         } else {
-            send_fail(out, 404, "not_found", "Сторінку не знайдено", scratch, cap);
+            send_fail_h(out, head_only, 404, "not_found", "Сторінку не знайдено", scratch, cap);
         }
         return after;
     }
@@ -445,7 +460,7 @@ api_after_t api_handle(const api_backend_t *b, const http_request_t *req, const 
     return after;
 }
 
-void api_send_error(const api_out_t *out, int status, char *scratch, size_t cap)
+void api_send_error(const api_out_t *out, int status, bool head_only, char *scratch, size_t cap)
 {
     const char *msg;
     switch (status) {
@@ -456,5 +471,5 @@ void api_send_error(const api_out_t *out, int status, char *scratch, size_t cap)
     case 505: msg = "Версія HTTP не підтримується"; break;
     default: msg = "Некоректний запит"; break;
     }
-    send_fail(out, status, "http", msg, scratch, cap);
+    send_fail_h(out, head_only, status, "http", msg, scratch, cap);
 }

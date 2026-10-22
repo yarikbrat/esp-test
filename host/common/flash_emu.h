@@ -14,7 +14,8 @@ typedef struct {
     int cut_after_bytes;       // >= 0: next write stores only this many bytes and fails
     bool fail_erase;
     bool fail_write;
-    const char *backing_file;  // if set, state is saved to this file after every change
+    const char *backing_file;  // if set, every change is written through to this file
+    int fd;
 } flash_emu_t;
 
 void flash_emu_init(flash_emu_t *fe, uint32_t size, uint32_t sector_size, const char *backing_file);

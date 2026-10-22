@@ -61,67 +61,11 @@ static bool contains_token_ci(const char *s, size_t len, const char *tok)
     return false;
 }
 
-// Parses the collected head. Returns 0 or an HTTP error status. Always sets p->body_need.
-static int parse_head(http_parser_t *p)
+// Header pass. Sets p->body_need as soon as Content-Length is seen, so a body can still be
+// skipped when a later header line or the request line turns out to be invalid.
+static int parse_headers(http_parser_t *p, char *line, char *end)
 {
-    http_request_t *r = &p->req;
-    memset(r, 0, sizeof(*r));
-    p->body_need = 0;
-    int pending = 0; // method error is reported after headers so the body length is known
-    char *h = p->head;
-    char *end = h + p->head_len;
-
-    char *eol = memchr(h, '\n', (size_t)(end - h));
-    if (!eol) {
-        return 400;
-    }
-    size_t line_len = (size_t)(eol - h);
-    if (line_len > 0 && h[line_len - 1] == '\r') {
-        line_len--;
-    }
-
-    char *sp1 = memchr(h, ' ', line_len);
-    if (!sp1) {
-        return 400;
-    }
-    size_t mlen = (size_t)(sp1 - h);
-    if (mlen == 3 && memcmp(h, "GET", 3) == 0) {
-        r->method = HTTP_GET;
-    } else if (mlen == 4 && memcmp(h, "HEAD", 4) == 0) {
-        r->method = HTTP_HEAD;
-    } else if (mlen == 4 && memcmp(h, "POST", 4) == 0) {
-        r->method = HTTP_POST;
-    } else {
-        pending = 501;
-    }
-    char *target = sp1 + 1;
-    char *line_end = h + line_len;
-    char *sp2 = memchr(target, ' ', (size_t)(line_end - target));
-    if (!sp2 || target[0] != '/') {
-        return 400;
-    }
-    char *ver = sp2 + 1;
-    if ((size_t)(line_end - ver) != 8 || memcmp(ver, "HTTP/1.", 7) != 0) {
-        return 505;
-    }
-    char *q = memchr(target, '?', (size_t)(sp2 - target));
-    char *path_end = q ? q : sp2;
-    size_t plen = (size_t)(path_end - target);
-    if (plen > HTTP_MAX_PATH) {
-        return 414;
-    }
-    memcpy(r->path, target, plen);
-    if (q) {
-        size_t qlen = (size_t)(sp2 - q - 1);
-        if (qlen > HTTP_MAX_QUERY) {
-            return 414;
-        }
-        memcpy(r->query, q + 1, qlen);
-    }
-
     bool have_len = false;
-    size_t content_length = 0;
-    char *line = eol + 1;
     while (line < end) {
         char *nl = memchr(line, '\n', (size_t)(end - line));
         if (!nl) {
@@ -160,24 +104,91 @@ static int parse_head(http_parser_t *p)
                 }
                 v = v * 10 + (size_t)(val[i] - '0');
             }
-            if (have_len && v != content_length) {
-                return 400; // conflicting lengths: classic desync vector
+            if (have_len && v != p->body_need) {
+                p->body_need = 0; // conflicting lengths: no length is trustworthy
+                return 400;
             }
             have_len = true;
-            content_length = v;
+            p->body_need = v;
         } else if (name_is(line, nlen, "Transfer-Encoding")) {
             return 501; // chunked request bodies are not supported
         } else if (name_is(line, nlen, "Accept-Encoding")) {
-            r->accept_gzip = contains_token_ci(val, vlen, "gzip");
+            p->req.accept_gzip = contains_token_ci(val, vlen, "gzip");
         }
         line = nl + 1;
     }
+    return 0;
+}
 
-    p->body_need = content_length;
-    if (pending) {
-        return pending;
+static int parse_request_line(http_request_t *r, char *h, size_t line_len)
+{
+    int pending = 0; // unknown method is reported after the rest of the line is checked
+    char *sp1 = memchr(h, ' ', line_len);
+    if (!sp1) {
+        return 400;
     }
-    if (content_length > HTTP_MAX_BODY) {
+    size_t mlen = (size_t)(sp1 - h);
+    if (mlen == 3 && memcmp(h, "GET", 3) == 0) {
+        r->method = HTTP_GET;
+    } else if (mlen == 4 && memcmp(h, "HEAD", 4) == 0) {
+        r->method = HTTP_HEAD;
+    } else if (mlen == 4 && memcmp(h, "POST", 4) == 0) {
+        r->method = HTTP_POST;
+    } else {
+        pending = 501;
+    }
+    char *target = sp1 + 1;
+    char *line_end = h + line_len;
+    char *sp2 = memchr(target, ' ', (size_t)(line_end - target));
+    if (!sp2 || target[0] != '/') {
+        return 400;
+    }
+    char *ver = sp2 + 1;
+    if ((size_t)(line_end - ver) != 8 || memcmp(ver, "HTTP/1.", 7) != 0) {
+        return 505;
+    }
+    char *q = memchr(target, '?', (size_t)(sp2 - target));
+    char *path_end = q ? q : sp2;
+    size_t plen = (size_t)(path_end - target);
+    if (plen > HTTP_MAX_PATH) {
+        return 414;
+    }
+    memcpy(r->path, target, plen);
+    if (q) {
+        size_t qlen = (size_t)(sp2 - q - 1);
+        if (qlen > HTTP_MAX_QUERY) {
+            return 414;
+        }
+        memcpy(r->query, q + 1, qlen);
+    }
+    return pending;
+}
+
+// Parses the collected head. Returns 0 or an HTTP error status; p->body_need is the body length
+// whenever it could be determined, even on error.
+static int parse_head(http_parser_t *p)
+{
+    memset(&p->req, 0, sizeof(p->req));
+    p->body_need = 0;
+    char *h = p->head;
+    char *end = h + p->head_len;
+    char *eol = memchr(h, '\n', (size_t)(end - h));
+    if (!eol) {
+        return 400;
+    }
+    int hdr_err = parse_headers(p, eol + 1, end);
+    size_t line_len = (size_t)(eol - h);
+    if (line_len > 0 && h[line_len - 1] == '\r') {
+        line_len--;
+    }
+    int line_err = parse_request_line(&p->req, h, line_len);
+    if (line_err) {
+        return line_err;
+    }
+    if (hdr_err) {
+        return hdr_err;
+    }
+    if (p->body_need > HTTP_MAX_BODY) {
         return 413;
     }
     return 0;
@@ -218,6 +229,7 @@ size_t http_parser_feed(http_parser_t *p, const uint8_t *data, size_t len, uint3
                 p->tail = ((uint32_t)(uint8_t)p->head[p->head_len - 3] << 16) |
                           ((uint32_t)(uint8_t)p->head[p->head_len - 2] << 8) |
                           (uint8_t)p->head[p->head_len - 1];
+                p->error_head = memcmp(p->head, "HEAD ", 5) == 0;
                 fail(p, 431, ev);
                 return i;
             }
@@ -226,10 +238,13 @@ size_t http_parser_feed(http_parser_t *p, const uint8_t *data, size_t len, uint3
             if (head_complete(p->head, p->head_len)) {
                 int status = parse_head(p);
                 if (status != 0) {
-                    // Skip a body of known length so it is not parsed as the next request.
+                    // Skip a body of known, modest length so it is not parsed as the next request.
+                    // A huge claimed length is not honoured: skipping it would swallow other
+                    // clients' requests on the merged stream until the total timeout.
                     size_t skip = p->body_need;
+                    p->error_head = p->head_len >= 5 && memcmp(p->head, "HEAD ", 5) == 0;
                     http_parser_reset(p);
-                    if (skip > 0) {
+                    if (skip > 0 && skip <= HTTP_MAX_SKIP) {
                         p->state = ST_SKIP_BODY;
                         p->body_need = skip;
                     }

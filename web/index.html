@@ -324,9 +324,14 @@ async function loadLog(append) {
   finally { logLoading = false; $("#logLoad").disabled = false; $("#logOlder").disabled = olderBefore === null; }
 }
 async function loadLogPage(append) {
-  const q = append && olderBefore !== null ? "?before=" + olderBefore : "";
-  const res = await api("GET", "/api/log" + q);
   const m = $("#logMsg");
+  let cursor = append ? olderBefore : null, res;
+  // A page can come back empty across a run of gaps; follow the cursor a few pages further.
+  for (let hops = 0; hops < 10; hops++) {
+    res = await api("GET", "/api/log" + (cursor !== null ? "?before=" + cursor : ""));
+    if (!res.ok || res.data.records.length || res.data.next_before === null) break;
+    cursor = res.data.next_before;
+  }
   if (!res.ok) { setMsg(m, msgOf(res, "Не вдалося прочитати історію"), "bad"); return; }
   const tb = $("#logTable tbody");
   if (!append) tb.textContent = "";

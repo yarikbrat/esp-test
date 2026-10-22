@@ -1,18 +1,20 @@
+#define _GNU_SOURCE // pread/pwrite under -std=c11
 #include "flash_emu.h"
 
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
-static void persist(flash_emu_t *fe)
+// Writes back only the touched range, so a 32-byte append costs 32 bytes of file I/O.
+static void persist(flash_emu_t *fe, uint32_t off, uint32_t len)
 {
-    if (!fe->backing_file) {
+    if (fe->fd < 0) {
         return;
     }
-    FILE *f = fopen(fe->backing_file, "wb");
-    if (f) {
-        fwrite(fe->mem, 1, fe->size, f);
-        fclose(f);
+    if (pwrite(fe->fd, fe->mem + off, len, (off_t)off) != (ssize_t)len) {
+        perror("flash_emu pwrite");
     }
 }
 
@@ -24,19 +26,27 @@ void flash_emu_init(flash_emu_t *fe, uint32_t size, uint32_t sector_size, const 
     fe->sector_size = sector_size;
     fe->cut_after_bytes = -1;
     fe->backing_file = backing_file;
+    fe->fd = -1;
     memset(fe->mem, 0xFF, size);
     if (backing_file) {
-        FILE *f = fopen(backing_file, "rb");
-        if (f) {
-            size_t got = fread(fe->mem, 1, size, f);
-            (void)got;
-            fclose(f);
+        fe->fd = open(backing_file, O_RDWR | O_CREAT, 0644);
+        if (fe->fd < 0) {
+            perror("flash_emu open");
+        } else {
+            ssize_t got = pread(fe->fd, fe->mem, size, 0);
+            if (got >= 0 && got < (ssize_t)size) {
+                persist(fe, 0, size); // new or short file: write out the erased image once
+            }
         }
     }
 }
 
 void flash_emu_free(flash_emu_t *fe)
 {
+    if (fe->fd >= 0) {
+        close(fe->fd);
+        fe->fd = -1;
+    }
     free(fe->mem);
     fe->mem = NULL;
 }
@@ -71,7 +81,7 @@ static int emu_write(void *ctx, uint32_t off, const void *src, uint32_t len)
     for (uint32_t i = 0; i < n; i++) {
         fe->mem[off + i] &= s[i]; // NOR: bits only go 1 -> 0
     }
-    persist(fe);
+    persist(fe, off, n);
     return ret;
 }
 
@@ -85,11 +95,11 @@ static int emu_erase(void *ctx, uint32_t off)
         return -13;
     }
     memset(fe->mem + off, 0xFF, fe->sector_size);
+    persist(fe, off, fe->sector_size);
     uint32_t idx = off / fe->sector_size;
     if (idx < sizeof(fe->erase_count) / sizeof(fe->erase_count[0])) {
         fe->erase_count[idx]++;
     }
-    persist(fe);
     return 0;
 }
 

@@ -12,6 +12,7 @@ extern "C" {
 
 #define HTTP_MAX_HEAD         1536 // request line + headers
 #define HTTP_MAX_BODY         512
+#define HTTP_MAX_SKIP         2048 // largest rejected body we skip instead of resyncing
 #define HTTP_MAX_PATH         96
 #define HTTP_MAX_QUERY        96
 #define HTTP_IDLE_TIMEOUT_MS  2000 // max gap between bytes inside a request
@@ -54,6 +55,7 @@ typedef struct {
     uint32_t last_ms;
     uint32_t tail; // last 4 bytes while skipping to the end of headers
     int error_status;
+    bool error_head; // the failed request was HEAD, so the error reply must have no body
     http_request_t req;
     http_stats_t stats;
 } http_parser_t;

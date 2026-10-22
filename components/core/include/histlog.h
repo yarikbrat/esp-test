@@ -65,7 +65,10 @@ int histlog_clear(histlog_t *hl);
 uint32_t histlog_count(const histlog_t *hl);
 
 // Reads up to max records with seq < before_seq, newest first (HL_SEQ_EMPTY = from newest).
-size_t histlog_read_recent(histlog_t *hl, uint32_t before_seq, hl_record_t *out, size_t max);
+// *next_before (optional) is the cursor for the next page, HL_SEQ_EMPTY when nothing older is left;
+// it comes from the walk itself, so a run of gaps never ends pagination early.
+size_t histlog_read_recent(histlog_t *hl, uint32_t before_seq, hl_record_t *out, size_t max,
+                           uint32_t *next_before);
 
 #ifdef __cplusplus
 }

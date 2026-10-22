@@ -140,8 +140,9 @@ int histlog_clear(histlog_t *hl)
     for (uint32_t s = 0; s < hl->n_sectors; s++) {
         int err = hl->fl->erase_sector(hl->fl->ctx, s * hl->fl->sector_size);
         if (err) {
+            hl->write_errors++;
             hl->last_error = err;
-            return err;
+            return err; // partly erased; the next open() rescan gives the true state
         }
     }
     hl->next_seq = 0;
@@ -151,7 +152,8 @@ int histlog_clear(histlog_t *hl)
     return 0;
 }
 
-size_t histlog_read_recent(histlog_t *hl, uint32_t before_seq, hl_record_t *out, size_t max)
+size_t histlog_read_recent(histlog_t *hl, uint32_t before_seq, hl_record_t *out, size_t max,
+                           uint32_t *next_before)
 {
     size_t n = 0;
     uint32_t seq = before_seq < hl->next_seq ? before_seq : hl->next_seq;
@@ -163,6 +165,9 @@ size_t histlog_read_recent(histlog_t *hl, uint32_t before_seq, hl_record_t *out,
         if (read_slot(hl, slot, &r) == 0 && r.seq == seq && rec_valid_at(hl, &r, slot)) {
             out[n++] = r;
         }
+    }
+    if (next_before) {
+        *next_before = seq > hl->oldest_seq ? seq : HL_SEQ_EMPTY;
     }
     return n;
 }

@@ -193,6 +193,42 @@ void test_http(void)
     CHECK_EQ_INT(fr.requests, 1);
     CHECK(strcmp(fr.last.path, "/good") == 0);
 
+    // Request-line errors still skip a declared body: it must not be parsed as the next request.
+    http_parser_init(&p);
+    fr = feed_str(&p, "POST /aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                      " HTTP/1.1\r\nContent-Length: 30\r\n\r\nGET /api/log/clear HTTP/1.1\r\n\r\n"
+                      "GET /real HTTP/1.1\r\n\r\n", 4096, 0);
+    CHECK_EQ_INT(fr.last_status, 414);
+    CHECK_EQ_INT(fr.errors, 1);
+    CHECK_EQ_INT(fr.requests, 1);
+    CHECK(strcmp(fr.last.path, "/real") == 0);
+    http_parser_init(&p);
+    fr = feed_str(&p, "POST /x HTTP/2.0\r\nContent-Length: 6\r\n\r\nGET / \r\nGET /real HTTP/1.1\r\n\r\n", 4096, 0);
+    CHECK_EQ_INT(fr.last_status, 505);
+    CHECK_EQ_INT(fr.requests, 1);
+    CHECK(strcmp(fr.last.path, "/real") == 0);
+    http_parser_init(&p);
+    fr = feed_str(&p, "POST /x HTTP/1.1\r\nContent-Length: 6\r\nbroken line\r\n\r\nGET / GET /real HTTP/1.1\r\n\r\n",
+                  4096, 0);
+    CHECK_EQ_INT(fr.last_status, 400);
+    CHECK_EQ_INT(fr.requests, 1);
+    CHECK(strcmp(fr.last.path, "/real") == 0);
+
+    // A huge claimed length is rejected without swallowing the following requests.
+    http_parser_init(&p);
+    fr = feed_str(&p, "POST /api/net HTTP/1.1\r\nContent-Length: 999999999\r\n\r\n"
+                      "GET /api/state HTTP/1.1\r\n\r\n", 4096, 0);
+    CHECK_EQ_INT(fr.last_status, 413);
+    CHECK_EQ_INT(fr.requests, 1);
+    CHECK(strcmp(fr.last.path, "/api/state") == 0);
+
+    // HEAD is remembered for error replies, GET is not.
+    http_parser_init(&p);
+    feed_str(&p, "HEAD /x HTTP/9.9\r\n\r\n", 4096, 0);
+    CHECK(p.error_head);
+    feed_str(&p, "GET /x HTTP/9.9\r\n\r\n", 4096, 0);
+    CHECK(!p.error_head);
+
     // Conflicting Content-Length, chunked, bad version, bad length, long URI.
     http_parser_init(&p);
     fr = feed_str(&p, "POST / HTTP/1.1\r\nContent-Length: 3\r\nContent-Length: 4\r\n\r\n", 4096, 0);

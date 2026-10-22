@@ -45,7 +45,7 @@ void test_histlog(void)
     CHECK_EQ_INT(histlog_open(&hl, &ops, 4), 0);
     CHECK_EQ_INT(hl.capacity, 4 * RPS);
     CHECK_EQ_INT(histlog_count(&hl), 0);
-    CHECK_EQ_INT(histlog_read_recent(&hl, HL_SEQ_EMPTY, out, 10), 0);
+    CHECK_EQ_INT(histlog_read_recent(&hl, HL_SEQ_EMPTY, out, 10, NULL), 0);
 
     // Write, then "reboot".
     append_n(&hl, 200);
@@ -55,7 +55,7 @@ void test_histlog(void)
     CHECK_EQ_INT(hl.oldest_seq, 0);
     CHECK_EQ_INT(hl.corrupt, 0);
 
-    size_t n = histlog_read_recent(&hl, HL_SEQ_EMPTY, out, 3);
+    size_t n = histlog_read_recent(&hl, HL_SEQ_EMPTY, out, 3, NULL);
     CHECK_EQ_INT(n, 3);
     CHECK_EQ_INT(out[0].seq, 199);
     CHECK_EQ_INT(out[2].seq, 197);
@@ -63,7 +63,7 @@ void test_histlog(void)
     CHECK(isnan(out[0].p_pa[1]) && isnan(out[0].h_m[1]));
     CHECK_EQ_INT(HL_F_STATUS(out[0].flags[1]), 3);
     CHECK(!(out[0].flags[1] & HL_F_VALID));
-    n = histlog_read_recent(&hl, 2, out, 10); // page "before seq 2"
+    n = histlog_read_recent(&hl, 2, out, 10, NULL); // page "before seq 2"
     CHECK_EQ_INT(n, 2);
     CHECK_EQ_INT(out[0].seq, 1);
     CHECK_EQ_INT(out[1].seq, 0);
@@ -85,7 +85,7 @@ void test_histlog(void)
     CHECK_EQ_INT(hl.next_seq, total);
     CHECK_EQ_INT(hl.oldest_seq, oldest_before);
     CHECK_EQ_INT(histlog_count(&hl), count_before);
-    n = histlog_read_recent(&hl, HL_SEQ_EMPTY, out, 600);
+    n = histlog_read_recent(&hl, HL_SEQ_EMPTY, out, 600, NULL);
     CHECK_EQ_INT(n, histlog_count(&hl));
     CHECK_EQ_INT(out[0].seq, total - 1);
     CHECK_EQ_INT(out[n - 1].seq, hl.oldest_seq);
@@ -103,10 +103,34 @@ void test_histlog(void)
     r = make_rec(10000);
     CHECK_EQ_INT(histlog_append(&hl, &r), 0); // dirty slot is skipped
     CHECK_EQ_INT(r.seq, cut_seq + 1);
-    n = histlog_read_recent(&hl, HL_SEQ_EMPTY, out, 2);
+    n = histlog_read_recent(&hl, HL_SEQ_EMPTY, out, 2, NULL);
     CHECK_EQ_INT(n, 2);
     CHECK_EQ_INT(out[0].seq, cut_seq + 1);
     CHECK_EQ_INT(out[1].seq, cut_seq - 1); // gap skipped
+
+    // A long run of gaps (failed writes burn seqs) must not end pagination early.
+    uint32_t before_gap = hl.next_seq - 1;
+    fe.fail_write = true;
+    for (int i = 0; i < 100 && hl.next_seq % RPS != 0; i++) {
+        r = make_rec(0);
+        histlog_append(&hl, &r);
+    }
+    fe.fail_write = false;
+    append_n(&hl, 1);
+    uint32_t cursor = HL_SEQ_EMPTY;
+    n = histlog_read_recent(&hl, HL_SEQ_EMPTY, out, 2, &cursor);
+    CHECK_EQ_INT(n, 1); // only the record after the gap fits in the walk budget
+    CHECK(cursor != HL_SEQ_EMPTY);
+    size_t pages = 0;
+    while (cursor != HL_SEQ_EMPTY && pages++ < 20) {
+        n = histlog_read_recent(&hl, cursor, out, 2, &cursor);
+        if (n) {
+            break;
+        }
+    }
+    CHECK(n > 0 && out[0].seq == before_gap); // older history still reachable
+    n = histlog_read_recent(&hl, 1 + hl.oldest_seq, out, 5, &cursor);
+    CHECK(n <= 1 && cursor == HL_SEQ_EMPTY);
 
     // Erase failure: visible error, log keeps working afterwards.
     while (hl.next_seq % RPS != 0) {
@@ -121,6 +145,13 @@ void test_histlog(void)
     fe.fail_erase = false;
     CHECK_EQ_INT(histlog_append(&hl, &r), 0);
     CHECK_EQ_INT(hl.last_error, 0);
+
+    // A failed clear is counted as a write error.
+    fe.fail_erase = true;
+    errs = hl.write_errors;
+    CHECK(histlog_clear(&hl) != 0);
+    CHECK_EQ_INT(hl.write_errors, errs + 1);
+    fe.fail_erase = false;
 
     // Write failure is reported.
     fe.fail_write = true;
@@ -140,7 +171,7 @@ void test_histlog(void)
     // Changing the ring size without clearing must not resurrect records in the wrong slots.
     append_n(&hl, 3 * RPS);
     CHECK_EQ_INT(histlog_open(&hl, &ops, 2), 0);
-    n = histlog_read_recent(&hl, HL_SEQ_EMPTY, out, 600);
+    n = histlog_read_recent(&hl, HL_SEQ_EMPTY, out, 600, NULL);
     for (size_t i = 0; i < n; i++) {
         CHECK(out[i].seq % hl.capacity == out[i].seq % (2 * RPS));
     }

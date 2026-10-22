@@ -163,9 +163,11 @@ static persist_t f_cfg(void *ctx, const log_cfg_t *c)
     return PERSIST_OK;
 }
 static bool f_clear(void *ctx) { ((fake_t *)ctx)->clear_calls++; return true; }
-static size_t f_read(void *ctx, uint32_t before, hl_record_t *out, size_t max)
+static size_t f_read(void *ctx, uint32_t before, hl_record_t *out, size_t max, uint32_t *next_before)
 {
     (void)ctx;
+    uint32_t start = before == HL_SEQ_EMPTY ? 3 : before;
+    *next_before = start > max ? start - (uint32_t)max : HL_SEQ_EMPTY;
     size_t n = 0;
     for (uint32_t seq = before == HL_SEQ_EMPTY ? 3 : before; seq > 0 && n < max; seq--, n++) {
         memset(&out[n], 0, sizeof(out[n]));
@@ -241,6 +243,15 @@ void test_api(void)
     CHECK(has(f, "404") && has(f, "Сторінку не знайдено"));
     call(f, HTTP_GET, "/api/zero", NULL, NULL, false);
     CHECK(has(f, "405"));
+    call(f, HTTP_POST, "/api/state", NULL, NULL, false);
+    CHECK(has(f, "405"));
+    // HEAD error replies carry Content-Length but no body, or the shared stream desyncs.
+    call(f, HTTP_HEAD, "/api/zero", NULL, NULL, false);
+    CHECK(has(f, "405") && has(f, "Content-Length: ") && strstr(f->out, "\r\n\r\n")[4] == '\0');
+    call(f, HTTP_HEAD, "/nope", NULL, NULL, false);
+    CHECK(has(f, "404") && strstr(f->out, "\r\n\r\n")[4] == '\0');
+    call(f, HTTP_POST, "/index.html", NULL, NULL, false);
+    CHECK(has(f, "405") && has(f, "\"ok\":false"));
 
     // State before any data: no numbers, Ukrainian statuses, altitude null.
     call(f, HTTP_GET, "/api/state", NULL, NULL, false);
