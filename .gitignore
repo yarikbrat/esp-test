@@ -1,0 +1,8 @@
+build/
+host/build/
+sdkconfig
+sdkconfig.old
+managed_components/
+.playwright-mcp/
+host/emu_data/
+tz/

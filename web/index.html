@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Стенд ESP32 — датчики</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--fg:#1d2330;--mute:#667085;--line:#e3e6eb;--ok:#13804a;--bad:#c4321d;--warn:#a15c00;--acc:#2456c6;--accfg:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#14171c;--card:#1d2128;--fg:#e7eaf0;--mute:#98a2b3;--line:#2e343e;--ok:#4cc38a;--bad:#ff7b66;--warn:#f0b450;--acc:#6f9bff;--accfg:#0b1020}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--card)}
+h1{font-size:18px;margin:0}
+h2{font-size:16px;margin:0 0 10px}
+main{max-width:1100px;margin:0 auto;padding:16px;display:grid;gap:16px}
+.grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;min-width:0}
+.big{font-size:30px;font-weight:600;font-variant-numeric:tabular-nums;margin:4px 0}
+.big.stale{color:var(--mute)}
+.big.text{font-size:20px;line-height:44px}
+.row{display:flex;justify-content:space-between;gap:12px;padding:3px 0;border-top:1px solid var(--line)}
+.row:first-of-type{border-top:0}
+.row span:first-child{color:var(--mute)}
+.row span:last-child{text-align:right;font-variant-numeric:tabular-nums}
+.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}.mute{color:var(--mute)}
+.badge{display:inline-block;font-size:12px;padding:1px 8px;border-radius:10px;border:1px solid currentColor;margin-left:6px;vertical-align:middle}
+.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+button{font:inherit;padding:7px 12px;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer}
+button.primary{background:var(--acc);border-color:var(--acc);color:var(--accfg)}
+button:disabled{opacity:.5;cursor:default}
+input{font:inherit;padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--fg);width:100%}
+input[type=checkbox]{width:auto}
+label{display:block;margin:6px 0 2px;color:var(--mute)}
+.msg{min-height:1.4em;margin-top:8px}
+.form{display:grid;gap:4px 12px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));align-items:end}
+.tablewrap{overflow-x:auto;margin-top:10px}
+table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
+th,td{padding:4px 6px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th{color:var(--mute);font-weight:500}
+th:first-child,td:first-child{text-align:left}
+.note{font-size:13px;color:var(--mute);margin-top:8px}
+a{color:var(--acc)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Стенд ESP32: HC-SR04, BMP585, BMP581</h1>
+  <div><span id="link" class="bad">Немає зв'язку</span> <span id="linkAge" class="mute"></span></div>
+</header>
+<main>
+  <div class="grid">
+    <section id="sonar" aria-labelledby="sonarTitle">
+      <h2 id="sonarTitle">HC-SR04 — відстань</h2>
+      <div class="big text stale" data-k="value">Немає даних</div>
+      <div class="row"><span>Стан</span><span data-k="st">—</span></div>
+      <div class="row"><span>Вік вимірювання</span><span data-k="age">—</span></div>
+      <div class="row"><span>Помилок вимірювання</span><span data-k="errors">—</span></div>
+    </section>
+    <section class="baro" data-ch="0" aria-labelledby="b0t">
+      <h2 id="b0t">BMP585</h2>
+      <div class="big text stale" data-k="alt">Нуль не встановлено</div>
+      <div class="row"><span>Тиск</span><span data-k="hpa">—</span></div>
+      <div class="row"><span>Стан</span><span data-k="st">—</span></div>
+      <div class="row"><span>Вік вимірювання</span><span data-k="age">—</span></div>
+      <div class="row"><span>Статус нуля</span><span data-k="zero">—</span></div>
+      <div class="row"><span>Опорний тиск p₀</span><span data-k="p0">—</span></div>
+      <div class="actions">
+        <button class="primary" data-act="zero">Встановити нуль</button>
+        <button data-act="reset">Скинути збережений нуль</button>
+      </div>
+      <div class="msg" data-k="msg" role="status" aria-live="polite"></div>
+    </section>
+    <section class="baro" data-ch="1" aria-labelledby="b1t">
+      <h2 id="b1t">BMP581</h2>
+      <div class="big text stale" data-k="alt">Нуль не встановлено</div>
+      <div class="row"><span>Тиск</span><span data-k="hpa">—</span></div>
+      <div class="row"><span>Стан</span><span data-k="st">—</span></div>
+      <div class="row"><span>Вік вимірювання</span><span data-k="age">—</span></div>
+      <div class="row"><span>Статус нуля</span><span data-k="zero">—</span></div>
+      <div class="row"><span>Опорний тиск p₀</span><span data-k="p0">—</span></div>
+      <div class="actions">
+        <button class="primary" data-act="zero">Встановити нуль</button>
+        <button data-act="reset">Скинути збережений нуль</button>
+      </div>
+      <div class="msg" data-k="msg" role="status" aria-live="polite"></div>
+    </section>
+  </div>
+
+  <section id="hist" aria-labelledby="histTitle">
+    <h2 id="histTitle">Історія барометрів</h2>
+    <div class="form">
+      <div><label><input type="checkbox" id="logEn"> Журналювання увімкнено</label></div>
+      <div><label for="logIv">Інтервал збереження, с</label>
+        <input id="logIv" type="number" min="1" max="3600" step="1" value="10" inputmode="numeric"></div>
+      <div><button class="primary" id="logSave">Зберегти налаштування</button></div>
+    </div>
+    <div class="msg" id="logMsg" role="status" aria-live="polite"></div>
+    <div class="row"><span>Поточні налаштування</span><span id="logCur">—</span></div>
+    <div class="row"><span>Заповнення сховища</span><span id="logFill">—</span></div>
+    <div class="row"><span>Помилки запису</span><span id="logErr">—</span></div>
+    <div class="actions">
+      <button id="logLoad">Показати останні записи</button>
+      <button id="logOlder" disabled>Старіші записи</button>
+      <button id="logClear">Очистити історію</button>
+    </div>
+    <div class="tablewrap">
+      <table id="logTable" hidden>
+        <thead>
+          <tr><th>№</th><th>Сесія</th><th>Час від старту</th>
+            <th>BMP585, гПа</th><th>BMP585, м</th><th>BMP585 стан</th>
+            <th>BMP581, гПа</th><th>BMP581, м</th><th>BMP581 стан</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="note">Значення двох датчиків у рядку належать одному циклу журналювання. Час — секунди від запуску стенда в цій сесії. «—» означає відсутність валідних даних або невстановлений нуль.</div>
+  </section>
+
+  <section id="net" aria-labelledby="netTitle">
+    <h2 id="netTitle">Мережеві налаштування</h2>
+    <div class="row"><span>Активна IP-адреса</span><span id="netIp">—</span></div>
+    <div class="row"><span>Маска</span><span id="netMask">—</span></div>
+    <div class="row"><span>Шлюз</span><span id="netGw">—</span></div>
+    <div class="row"><span>Порт HTTP</span><span id="netPort">—</span></div>
+    <div class="row"><span>Джерело налаштувань</span><span id="netOrigin">—</span></div>
+    <div class="row"><span>Ethernet</span><span id="netLink">—</span></div>
+    <form id="netForm" class="form" novalidate>
+      <div><label for="fIp">IP-адреса</label><input id="fIp" name="ip" autocomplete="off" required></div>
+      <div><label for="fMask">Маска</label><input id="fMask" name="mask" autocomplete="off" required></div>
+      <div><label for="fGw">Шлюз (необов'язково)</label><input id="fGw" name="gw" autocomplete="off"></div>
+      <div><button class="primary" type="submit">Зберегти та застосувати</button></div>
+    </form>
+    <div class="msg" id="netMsg" role="status" aria-live="polite"></div>
+    <div class="note">Якщо доступ за мережею втрачено: утримуйте кнопку BOOT на ESP32 5 с після ввімкнення живлення — стенд повернеться до адреси 192.168.144.36, маска 255.255.255.0.</div>
+  </section>
+  <div class="note" id="diag"></div>
+</main>
+<script>
+"use strict";
+const $ = (s, r = document) => r.querySelector(s);
+const MINUS = "−";
+
+// One request in flight at a time: the UART bridge serialises everything anyway.
+let chain = Promise.resolve();
+function api(method, path, body) {
+  const run = async () => {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 4000);
+    try {
+      const opt = { method, signal: ctl.signal, cache: "no-store" };
+      if (body) {
+        opt.body = new URLSearchParams(body).toString();
+        opt.headers = { "Content-Type": "application/x-www-form-urlencoded" };
+      }
+      const r = await fetch(path, opt);
+      let data = null;
+      try { data = await r.json(); } catch (e) { data = null; }
+      return { ok: r.ok && data !== null && data.ok !== false, status: r.status, data };
+    } catch (e) {
+      return { ok: false, status: 0, data: null, net: true };
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  const p = chain.then(run, run);
+  chain = p.catch(() => {});
+  return p;
+}
+
+function msgOf(res, fallback) {
+  if (res.net) return "Немає зв'язку зі стендом";
+  return (res.data && res.data.message) || fallback;
+}
+function setMsg(el, text, cls) { el.textContent = text || ""; el.className = "msg " + (cls || ""); }
+function fmtAge(ms) {
+  if (ms === null || ms === undefined) return "—";
+  return ms < 10000 ? (ms / 1000).toFixed(1) + " с" : Math.round(ms / 1000) + " с";
+}
+function fmtSigned(v, d) { return (v > 0 ? "+" : v < 0 ? MINUS : "") + Math.abs(v).toFixed(d); }
+function fmtDur(s) {
+  const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, sec = s % 60;
+  return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(sec).padStart(2, "0");
+}
+function stCell(el, ok, text) { el.textContent = text; el.className = ok ? "ok" : "bad"; }
+
+let last = null, lastOkAt = 0;
+
+function renderSonar(s) {
+  const box = $("#sonar"), v = $('[data-k="value"]', box);
+  if (s.fresh) { v.textContent = s.cm.toFixed(1) + " см"; v.className = "big"; }
+  else if (s.last_cm !== null) { v.textContent = s.last_cm.toFixed(1) + " см"; v.className = "big stale"; appendBadge(v, "застаріле"); }
+  else { v.textContent = "Немає даних"; v.className = "big text stale"; }
+  stCell($('[data-k="st"]', box), s.st === "ok" && s.fresh, s.st === "ok" && !s.fresh ? "Немає свіжих даних" : s.st_text);
+  $('[data-k="age"]', box).textContent = fmtAge(s.age_ms);
+  $('[data-k="errors"]', box).textContent = s.errors;
+}
+
+function appendBadge(el, text) {
+  const b = document.createElement("span");
+  b.className = "badge warn";
+  b.textContent = text;
+  el.appendChild(b);
+}
+
+function renderBaro(b, ch) {
+  const box = $('.baro[data-ch="' + ch + '"]');
+  const alt = $('[data-k="alt"]', box), hpa = $('[data-k="hpa"]', box);
+  if (!b.zero_set) { alt.textContent = "Нуль не встановлено"; alt.className = "big text stale"; }
+  else if (b.alt_m !== null) { alt.textContent = fmtSigned(b.alt_m, 2) + " м"; alt.className = "big"; }
+  else { alt.textContent = "Немає даних"; alt.className = "big text stale"; }
+  if (b.fresh) { hpa.textContent = b.hpa.toFixed(2) + " гПа"; hpa.className = ""; }
+  else if (b.last_hpa !== null) { hpa.textContent = b.last_hpa.toFixed(2) + " гПа"; hpa.className = "mute"; appendBadge(hpa, "застаріле"); }
+  else { hpa.textContent = "Немає даних"; hpa.className = "mute"; }
+  stCell($('[data-k="st"]', box), b.st === "ok" && b.fresh, b.st === "ok" && !b.fresh ? "Немає свіжих даних" : b.st_text);
+  $('[data-k="age"]', box).textContent = fmtAge(b.age_ms);
+  const z = $('[data-k="zero"]', box);
+  z.textContent = b.zero_text;
+  z.className = b.cal === "running" ? "warn" : b.persist === "error" ? "bad" : b.zero_set ? "ok" : "mute";
+  $('[data-k="p0"]', box).textContent = b.p0_hpa !== null ? b.p0_hpa.toFixed(2) + " гПа" : "—";
+  const running = b.cal === "running";
+  $('[data-act="zero"]', box).disabled = running;
+  $('[data-act="reset"]', box).disabled = running || !b.zero_set;
+  const m = $('[data-k="msg"]', box);
+  if (running) setMsg(m, "Калібрування… збираємо вимірювання (1–3 с)", "warn");
+  else if (box.dataset.waiting === "1" && b.cal_text) {
+    box.dataset.waiting = "";
+    let t = b.cal_text;
+    if (b.cal === "ok" && b.cal_spread_pa !== null) t += " (розкид " + b.cal_spread_pa.toFixed(1) + " Па)";
+    if (b.cal === "ok" && b.persist === "error") t += ", але не збережено у пам'ять";
+    setMsg(m, t, b.cal === "ok" && b.persist !== "error" ? "ok" : "bad");
+  }
+}
+
+function renderLog(l) {
+  $("#logCur").textContent = (l.enabled ? "увімкнено" : "вимкнено") + ", кожні " + l.interval_s + " с";
+  const pct = l.capacity ? (100 * l.count / l.capacity).toFixed(1) : "0";
+  $("#logFill").textContent = l.clearing ? "Очищення…" :
+    l.count + " із " + l.capacity + " записів (" + pct + " %), " + Math.round(l.bytes / 1024) + " КБ flash";
+  const e = $("#logErr");
+  e.textContent = l.write_errors ? l.write_errors + " (код " + l.last_error + ")" : "немає";
+  e.className = l.write_errors ? "bad" : "ok";
+  if (!logFormTouched) { $("#logEn").checked = l.enabled; $("#logIv").value = l.interval_s; }
+}
+
+function renderNet(n) {
+  $("#netIp").textContent = n.ip;
+  $("#netMask").textContent = n.mask;
+  $("#netGw").textContent = n.gw || "не задано";
+  $("#netPort").textContent = n.port;
+  $("#netOrigin").textContent = n.origin === "loaded" ? "збережені у пам'яті" :
+    n.origin === "corrupt" ? "запис пошкоджено, типові" : "типові (192.168.144.36)";
+  const link = $("#netLink");
+  if (!n.link) { link.textContent = "—"; link.className = ""; }
+  else { link.textContent = n.link.cable ? "кабель підключено" : "кабель відключено"; link.className = n.link.cable ? "ok" : "bad"; }
+  if (!netFormTouched) { $("#fIp").value = n.ip; $("#fMask").value = n.mask; $("#fGw").value = n.gw || ""; }
+  if (n.apply === "failed" && n.apply_msg) setMsg($("#netMsg"), n.apply_msg, "bad");
+}
+
+function render(s) {
+  renderSonar(s.sonar);
+  s.baro.forEach(renderBaro);
+  renderLog(s.log);
+  renderNet(s.net);
+  $("#diag").textContent = "Сесія " + s.session + ", робота " + fmtDur(s.up_s) + ", HTTP: запитів " +
+    s.http.requests + ", помилок " + s.http.errors + ", тайм-аутів " + s.http.timeouts +
+    (s.platform === "emulator" ? " · ЕМУЛЯТОР" : "");
+}
+
+function renderLink() {
+  const el = $("#link"), age = $("#linkAge");
+  const since = lastOkAt ? Date.now() - lastOkAt : null;
+  const ok = since !== null && since < 3000;
+  el.textContent = ok ? "Зв'язок є" : "Немає зв'язку";
+  el.className = ok ? "ok" : "bad";
+  age.textContent = since === null ? "" : "оновлено " + fmtAge(since) + " тому";
+  if (!ok && last) document.querySelectorAll(".big").forEach(b => b.classList.add("stale"));
+}
+
+async function poll() {
+  const started = Date.now();
+  const res = await api("GET", "/api/state");
+  if (res.ok) { last = res.data; lastOkAt = Date.now(); render(last); }
+  renderLink();
+  setTimeout(poll, Math.max(100, 1000 - (Date.now() - started)));
+}
+setInterval(renderLink, 500);
+
+document.querySelectorAll(".baro").forEach(box => {
+  const ch = box.dataset.ch, m = $('[data-k="msg"]', box), name = $("h2", box).textContent;
+  $('[data-act="zero"]', box).addEventListener("click", async ev => {
+    const btn = ev.currentTarget;
+    btn.disabled = true;
+    setMsg(m, "Калібрування… збираємо вимірювання (1–3 с)", "warn");
+    const res = await api("POST", "/api/zero", { ch });
+    if (res.ok) box.dataset.waiting = "1";
+    else { setMsg(m, msgOf(res, "Не вдалося запустити калібрування"), "bad"); btn.disabled = false; }
+  });
+  $('[data-act="reset"]', box).addEventListener("click", async () => {
+    if (!confirm("Скинути збережений нуль " + name + "? Висота стане невизначеною до нового обнулення.")) return;
+    const res = await api("POST", "/api/zero/reset", { ch });
+    setMsg(m, msgOf(res, res.ok ? "Збережений нуль скинуто" : "Не вдалося скинути нуль"), res.ok ? "ok" : "bad");
+  });
+});
+
+let logFormTouched = false;
+["#logEn", "#logIv"].forEach(s => $(s).addEventListener("input", () => { logFormTouched = true; }));
+$("#logSave").addEventListener("click", async () => {
+  const iv = $("#logIv").value.trim(), m = $("#logMsg");
+  if (!/^\d+$/.test(iv) || +iv < 1 || +iv > 3600) { setMsg(m, "Інтервал має бути цілим числом від 1 до 3600 с", "bad"); return; }
+  const res = await api("POST", "/api/log/config", { enabled: $("#logEn").checked ? 1 : 0, interval: iv });
+  setMsg(m, msgOf(res, res.ok ? "Збережено" : "Не вдалося зберегти"), res.ok ? "ok" : "bad");
+  if (res.ok) logFormTouched = false;
+});
+
+let olderBefore = null;
+function cell(tr, text, cls) { const td = document.createElement("td"); td.textContent = text; if (cls) td.className = cls; tr.appendChild(td); }
+let logLoading = false;
+async function loadLog(append) {
+  if (logLoading) return; // a second click would reuse the same page cursor
+  logLoading = true;
+  $("#logLoad").disabled = $("#logOlder").disabled = true;
+  try { await loadLogPage(append); }
+  finally { logLoading = false; $("#logLoad").disabled = false; $("#logOlder").disabled = olderBefore === null; }
+}
+async function loadLogPage(append) {
+  const q = append && olderBefore !== null ? "?before=" + olderBefore : "";
+  const res = await api("GET", "/api/log" + q);
+  const m = $("#logMsg");
+  if (!res.ok) { setMsg(m, msgOf(res, "Не вдалося прочитати історію"), "bad"); return; }
+  const tb = $("#logTable tbody");
+  if (!append) tb.textContent = "";
+  res.data.records.forEach(r => {
+    const tr = document.createElement("tr");
+    cell(tr, r.seq); cell(tr, r.session); cell(tr, fmtDur(r.t_s));
+    r.ch.forEach(c => {
+      cell(tr, c.valid && c.hpa !== null ? c.hpa.toFixed(2) : "—");
+      cell(tr, c.alt_m !== null ? fmtSigned(c.alt_m, 2) : (c.valid && !c.zero ? "нуль не вст." : "—"));
+      cell(tr, c.valid ? "норма" : c.st_text, c.valid ? "ok" : "bad");
+    });
+    tb.appendChild(tr);
+  });
+  $("#logTable").hidden = tb.children.length === 0;
+  olderBefore = res.data.next_before;
+  if (!tb.children.length) setMsg(m, "Записів немає", "mute");
+}
+$("#logLoad").addEventListener("click", () => loadLog(false));
+$("#logOlder").addEventListener("click", () => loadLog(true));
+$("#logClear").addEventListener("click", async () => {
+  if (!confirm("Очистити всю історію барометрів? Дію не можна скасувати.")) return;
+  const res = await api("POST", "/api/log/clear");
+  setMsg($("#logMsg"), msgOf(res, res.ok ? "Історію очищено" : "Не вдалося очистити"), res.ok ? "ok" : "bad");
+  if (res.ok) { $("#logTable tbody").textContent = ""; $("#logTable").hidden = true; olderBefore = null; $("#logOlder").disabled = true; }
+});
+
+let netFormTouched = false;
+const IP_RE = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+["#fIp", "#fMask", "#fGw"].forEach(s => $(s).addEventListener("input", () => { netFormTouched = true; }));
+$("#netForm").addEventListener("submit", async ev => {
+  ev.preventDefault();
+  const ip = $("#fIp").value.trim(), mask = $("#fMask").value.trim(), gw = $("#fGw").value.trim(), m = $("#netMsg");
+  if (!IP_RE.test(ip)) { setMsg(m, "Невірний формат IP-адреси", "bad"); return; }
+  if (!IP_RE.test(mask)) { setMsg(m, "Невірний формат маски", "bad"); return; }
+  if (gw && !IP_RE.test(gw)) { setMsg(m, "Невірний формат шлюзу", "bad"); return; }
+  const port = last ? last.net.port : 80;
+  const url = "http://" + ip + (port === 80 ? "" : ":" + port) + "/";
+  if (!confirm("Стенд перейде на адресу " + url + "\nПродовжити?")) return;
+  const res = await api("POST", "/api/net", { ip, mask, gw });
+  if (!res.ok) { setMsg(m, msgOf(res, "Налаштування не прийнято"), "bad"); return; }
+  netFormTouched = false;
+  m.className = "msg ok";
+  m.textContent = (res.data.message || "Налаштування прийнято") + ": ";
+  const a = document.createElement("a");
+  a.href = res.data.url; a.textContent = res.data.url;
+  m.appendChild(a);
+});
+
+poll();
+</script>
+</body>
+</html>
