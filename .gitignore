@@ -6,3 +6,4 @@ managed_components/
 .playwright-mcp/
 host/emu_data/
 tz/
+*.tgz
