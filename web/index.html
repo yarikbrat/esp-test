@@ -307,7 +307,7 @@ let netBusy = false; // polling pauses while the page moves the module to a new 
 async function poll() {
   const started = Date.now();
   const res = netBusy ? { ok: false } : await api("GET", "/api/state");
-  if (res.ok) { last = res.data; lastOkAt = Date.now(); render(last); await maybeCommitNet(last.net); }
+  if (res.ok) { last = res.data; lastOkAt = Date.now(); render(last); await maybeCommitNet(last.net); await logLiveTick(); }
   renderLink();
   setTimeout(poll, Math.max(100, 1000 - (Date.now() - started)));
 }
@@ -362,19 +362,60 @@ async function loadLogPage(append) {
   if (!res.ok) { setMsg(m, msgOf(res, "Не вдалося прочитати історію"), "bad"); return; }
   const tb = $("#logTable tbody");
   if (!append) tb.textContent = "";
-  res.data.records.forEach(r => {
-    const tr = document.createElement("tr");
-    cell(tr, r.seq); cell(tr, r.session); cell(tr, fmtDur(r.t_s));
-    r.ch.forEach(c => {
-      cell(tr, c.valid && c.hpa !== null ? c.hpa.toFixed(2) : "—");
-      cell(tr, c.alt_m !== null ? fmtSigned(c.alt_m, 2) : (c.valid && !c.zero ? "нуль не вст." : "—"));
-      cell(tr, c.valid ? "норма" : c.st_text, c.valid ? "ok" : "bad");
-    });
-    tb.appendChild(tr);
-  });
+  res.data.records.forEach(r => tb.appendChild(logRow(r)));
   $("#logTable").hidden = tb.children.length === 0;
   olderBefore = res.data.next_before;
-  if (!tb.children.length) setMsg(m, "Записів немає", "mute");
+  if (!append) { logLive = true; logTop = res.data.records.length ? res.data.records[0].seq : -1; }
+  else logLive = false; // older pages are being browsed; keep the table still
+  if (!tb.children.length) setMsg(m, emptyLogText(), "mute");
+}
+function logRow(r) {
+  const tr = document.createElement("tr");
+  cell(tr, r.seq); cell(tr, r.session); cell(tr, fmtDur(r.t_s));
+  r.ch.forEach(c => {
+    cell(tr, c.valid && c.hpa !== null ? c.hpa.toFixed(2) : "—");
+    cell(tr, c.alt_m !== null ? fmtSigned(c.alt_m, 2) : (c.valid && !c.zero ? "нуль не вст." : "—"));
+    cell(tr, c.valid ? "норма" : c.st_text, c.valid ? "ok" : "bad");
+  });
+  return tr;
+}
+function emptyLogText() {
+  const l = last && last.log;
+  if (!l || !l.enabled) return "Записів немає. Журналювання вимкнено: увімкніть його й натисніть «Зберегти налаштування».";
+  return "Записів поки немає. Перший запис з'явиться через " + l.interval_s + " с після збереження налаштувань.";
+}
+
+// While the newest page is shown, new records are prepended as the logger writes them.
+const LOG_LIVE_ROWS = 100;
+let logLive = false, logTop = -1, logLiveAt = 0;
+async function logLiveTick() {
+  const l = last && last.log;
+  if (!logLive || logLoading || !l || !l.enabled || l.clearing) return;
+  if (Date.now() - logLiveAt < Math.max(2000, l.interval_s * 1000)) return;
+  logLiveAt = Date.now();
+  logLoading = true;
+  try {
+    const res = await api("GET", "/api/log?limit=5");
+    if (!res.ok || !logLive) return;
+    const recs = res.data.records;
+    if (recs.length ? recs[0].seq < logTop : logTop >= 0) { logLoading = false; await loadLog(false); return; } // cleared elsewhere
+    const fresh = recs.filter(r => r.seq > logTop);
+    if (!fresh.length) return;
+    const tb = $("#logTable tbody");
+    if (fresh.length === recs.length && logTop >= 0) { logLoading = false; await loadLog(false); return; } // missed some
+    for (let i = fresh.length - 1; i >= 0; i--) tb.insertBefore(logRow(fresh[i]), tb.firstChild);
+    logTop = fresh[0].seq;
+    if (tb.children.length > LOG_LIVE_ROWS) {
+      while (tb.children.length > LOG_LIVE_ROWS) tb.removeChild(tb.lastChild);
+      olderBefore = +tb.lastChild.firstChild.textContent;
+      $("#logOlder").disabled = false;
+    }
+    $("#logTable").hidden = false;
+    const m = $("#logMsg");
+    if (m.classList.contains("mute")) setMsg(m, "", "");
+  } finally {
+    logLoading = false;
+  }
 }
 $("#logLoad").addEventListener("click", () => loadLog(false));
 $("#logOlder").addEventListener("click", () => loadLog(true));
@@ -382,7 +423,10 @@ $("#logClear").addEventListener("click", async () => {
   if (!confirm("Очистити всю історію барометрів? Дію не можна скасувати.")) return;
   const res = await api("POST", "/api/log/clear");
   setMsg($("#logMsg"), msgOf(res, res.ok ? "Історію очищено" : "Не вдалося очистити"), res.ok ? "ok" : "bad");
-  if (res.ok) { $("#logTable tbody").textContent = ""; $("#logTable").hidden = true; olderBefore = null; $("#logOlder").disabled = true; }
+  if (res.ok) {
+    $("#logTable tbody").textContent = ""; $("#logTable").hidden = true; olderBefore = null; $("#logOlder").disabled = true;
+    logLive = true; logTop = -1; logLiveAt = Date.now();
+  }
 });
 
 let netFormTouched = false;
