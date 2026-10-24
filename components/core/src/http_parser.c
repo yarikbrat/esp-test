@@ -132,10 +132,10 @@ static int parse_headers(http_parser_t *p, char *line, char *end)
             copy_token(p->req.rid, val, vlen);
         } else if (name_is(line, nlen, "X-Client-Id")) {
             copy_token(p->req.client, val, vlen);
-        } else if (name_is(line, nlen, "Host")) {
+        } else if (name_is(line, nlen, "Host") && !p->req.host[0]) { // the first Host header wins
             char *colon2 = memchr(val, ':', vlen); // drop ":port"
             size_t hlen = colon2 ? (size_t)(colon2 - val) : vlen;
-            if (hlen <= HTTP_MAX_HOST) {
+            if (hlen <= HTTP_MAX_HOST && !(vlen > 0 && val[0] == '[')) { // IPv6 literals: the module has none
                 memcpy(p->req.host, val, hlen);
                 p->req.host[hlen] = '\0';
             }
@@ -219,6 +219,13 @@ static int parse_head(http_parser_t *p)
     return 0;
 }
 
+// Keeps the start of a request that is about to be thrown away, so the caller can log what arrived.
+static void note_drop(http_parser_t *p)
+{
+    p->drop_len = p->head_len < HTTP_DROP_SNIPPET ? p->head_len : HTTP_DROP_SNIPPET;
+    memcpy(p->drop, p->head, p->drop_len);
+}
+
 static void fail(http_parser_t *p, int status, http_event_t *ev)
 {
     p->error_status = status;
@@ -242,6 +249,13 @@ size_t http_parser_feed(http_parser_t *p, const uint8_t *data, size_t len, uint3
                 i++;
                 break;
             }
+            // A request starts with an upper-case method. Anything else between requests is line noise,
+            // e.g. the 32 binary bytes UART TO ETH (B) writes to the UART after applying new settings.
+            if (c < 'A' || c > 'Z') {
+                p->stats.skipped_bytes++;
+                i++;
+                break;
+            }
             p->state = ST_HEAD;
             p->head_len = 0;
             p->start_ms = now_ms;
@@ -255,6 +269,7 @@ size_t http_parser_feed(http_parser_t *p, const uint8_t *data, size_t len, uint3
                           ((uint32_t)(uint8_t)p->head[p->head_len - 2] << 8) |
                           (uint8_t)p->head[p->head_len - 1];
                 p->error_head = memcmp(p->head, "HEAD ", 5) == 0;
+                note_drop(p);
                 fail(p, 431, ev);
                 return i;
             }
@@ -268,6 +283,7 @@ size_t http_parser_feed(http_parser_t *p, const uint8_t *data, size_t len, uint3
                     // clients' requests on the merged stream until the total timeout.
                     size_t skip = p->body_need;
                     p->error_head = p->head_len >= 5 && memcmp(p->head, "HEAD ", 5) == 0;
+                    note_drop(p);
                     http_parser_reset(p);
                     if (skip > 0 && skip <= HTTP_MAX_SKIP) {
                         p->state = ST_SKIP_BODY;
@@ -336,6 +352,7 @@ bool http_parser_tick(http_parser_t *p, uint32_t now_ms)
     }
     if (now_ms - p->last_ms > HTTP_IDLE_TIMEOUT_MS || now_ms - p->start_ms > HTTP_TOTAL_TIMEOUT_MS) {
         p->stats.timeouts++;
+        note_drop(p); // empty when the timeout hit while skipping a rejected body
         http_parser_reset(p);
         return true;
     }

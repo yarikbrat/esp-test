@@ -91,7 +91,10 @@ static int send(const api_out_t *out, int status, const char *ctype, const void 
                 const char *extra, bool head_only)
 {
     char head[320], hdrs[96];
-    snprintf(hdrs, sizeof(hdrs), "%s%s", extra ? extra : "", s_rid_header);
+    int hl = snprintf(hdrs, sizeof(hdrs), "%s%s", extra ? extra : "", s_rid_header);
+    if (hl < 0 || (size_t)hl >= sizeof(hdrs)) {
+        snprintf(hdrs, sizeof(hdrs), "%s", extra ? extra : ""); // never send a header cut mid-line
+    }
     size_t n = http_format_head(head, sizeof(head), status, ctype, len, hdrs[0] ? hdrs : NULL);
     if (n == 0) {
         return -1;
@@ -364,11 +367,6 @@ api_after_t api_handle(const api_backend_t *b, const http_request_t *req, const 
 
     uint32_t host_ip = 0;
     bool host_is_ip = netcfg_parse_ipv4(req->host, &host_ip);
-    netcfg_t pending;
-    if (host_is_ip && b->net_pending && b->net_pending(b->ctx, &pending) && pending.ip == host_ip) {
-        after.net_apply = true;
-        after.net = pending;
-    }
 
     if (strcmp(path, "/") == 0 || strcmp(path, "/index.html") == 0) {
         if (!is_get) {
@@ -409,7 +407,7 @@ api_after_t api_handle(const api_backend_t *b, const http_request_t *req, const 
     }
     // Remaining routes are POST-only; anything else is 405 for a known path, 404 otherwise.
     static const char *const post_routes[] = {"/api/zero", "/api/zero/reset", "/api/log/config",
-                                              "/api/log/clear", "/api/net"};
+                                              "/api/log/clear", "/api/net", "/api/net/commit"};
     static const char *const get_routes[] = {"/api/state", "/api/log"};
     bool post_route = false, get_route = false;
     for (size_t i = 0; i < sizeof(post_routes) / sizeof(post_routes[0]); i++) {
@@ -474,6 +472,18 @@ api_after_t api_handle(const api_backend_t *b, const http_request_t *req, const 
             send_ok(out, "Очищення історії розпочато", scratch, cap);
         } else {
             send_fail(out, 409, "busy", "Очищення вже виконується", scratch, cap);
+        }
+    } else if (strcmp(path, "/api/net/commit") == 0) {
+        // Sent by the page once it reached the new address; arriving there proves the module moved.
+        netcfg_t pending;
+        if (!b->net_pending || !b->net_pending(b->ctx, &pending)) {
+            send_fail(out, 409, "no_pending", "Немає змін мережі, що очікують застосування", scratch, cap);
+        } else if (!host_is_ip || host_ip != pending.ip) {
+            send_fail(out, 409, "wrong_host", "Запит надійшов не на нову адресу стенда", scratch, cap);
+        } else {
+            send_ok(out, "Нові мережеві налаштування збережено", scratch, cap);
+            after.net_apply = true;
+            after.net = pending;
         }
     } else if (strcmp(path, "/api/net") == 0) {
         char ip[20], mask[20], gw[20];

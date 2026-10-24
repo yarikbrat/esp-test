@@ -30,6 +30,12 @@ void app_load_settings(void)
     uint8_t buf[64];
     size_t n = kv_get("net", buf, sizeof(buf));
     g_app.net_origin = st_decode_net(n ? buf : NULL, n, &g_app.net);
+    // Settings sent to the module but not yet confirmed at the new address survive a reboot.
+    n = kv_get("netp", buf, sizeof(buf));
+    if (n && st_decode_net(buf, n, &g_app.net_pending) == ST_LOADED) {
+        g_app.net_apply = NET_APPLY_PENDING;
+        ESP_LOGI(TAG, "net: change pending, waiting for a commit at the new address");
+    }
     n = kv_get("log", buf, sizeof(buf));
     g_app.log_origin = st_decode_log(n ? buf : NULL, n, &g_app.log_cfg);
     ESP_LOGI(TAG, "net: %s, log: %s (%s, %u s)", origin_text(g_app.net_origin), origin_text(g_app.log_origin),
@@ -204,12 +210,16 @@ static void be_net_prepare(void *ctx, const netcfg_t *cfg)
     (void)ctx;
     char ip[16];
     netcfg_format_ipv4(cfg->ip, ip, sizeof(ip));
+    uint8_t buf[ST_NET_BLOB_SIZE];
+    size_t n = st_encode_net(cfg, buf, sizeof(buf));
+    bool saved = n && kv_set("netp", buf, n);
     app_lock();
     g_app.net_pending = *cfg;
     g_app.net_apply = NET_APPLY_PENDING;
     g_app.net_apply_msg = NULL;
     app_unlock();
-    ESP_LOGI(TAG, "net settings %s accepted, waiting for a request at that address", ip);
+    ESP_LOGI(TAG, "net settings %s accepted, pending until committed at that address%s", ip,
+             saved ? "" : " (not saved, lost on reboot)");
 }
 
 static bool be_net_pending(void *ctx, netcfg_t *out)
@@ -246,7 +256,7 @@ api_backend_t app_backend(void)
 // --- Network settings ---------------------------------------------------------------------------
 
 // The address lives in the UART TO ETH module; the page moves the module (docs/uart-to-eth-b.md). This runs
-// once a request has arrived at the new address, and stores the settings as the active ones.
+// on POST /api/net/commit at the new address (or BOOT) and stores the settings as the active ones.
 void app_net_apply(const netcfg_t *cfg)
 {
     char ip[16];
@@ -254,6 +264,7 @@ void app_net_apply(const netcfg_t *cfg)
     uint8_t buf[ST_NET_BLOB_SIZE];
     size_t n = st_encode_net(cfg, buf, sizeof(buf));
     bool ok = n && kv_set("net", buf, n);
+    kv_erase("netp");
     app_lock();
     g_app.net = *cfg; // the module already answers at this address, saved or not
     if (ok) {

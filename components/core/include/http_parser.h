@@ -17,6 +17,7 @@ extern "C" {
 #define HTTP_MAX_QUERY        96
 #define HTTP_MAX_HOST         64
 #define HTTP_MAX_RID          16
+#define HTTP_DROP_SNIPPET     48 // bytes of a rejected or timed-out request kept for the log
 #define HTTP_IDLE_TIMEOUT_MS  2000 // max gap between bytes inside a request
 #define HTTP_TOTAL_TIMEOUT_MS 5000 // max time from first byte
 
@@ -60,6 +61,8 @@ typedef struct {
     uint32_t last_ms;
     uint32_t tail; // last 4 bytes while skipping to the end of headers
     int error_status;
+    char drop[HTTP_DROP_SNIPPET]; // start of the last rejected or timed-out request, for diagnostics
+    size_t drop_len;
     bool error_head; // the failed request was HEAD, so the error reply must have no body
     http_request_t req;
     http_stats_t stats;

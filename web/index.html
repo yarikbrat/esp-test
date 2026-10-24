@@ -159,7 +159,8 @@ function api(method, path, body) {
         opt.headers["Content-Type"] = "application/x-www-form-urlencoded";
       }
       const r = await fetch(path, opt);
-      if (r.headers.get("X-Req-Id") !== rid) {
+      const got = r.headers.get("X-Req-Id");
+      if (got !== null && got !== rid) { // a reply without an id is a parser error for this request
         crossTalkAt = Date.now();
         return { ok: false, status: r.status, data: null, crossTalk: true };
       }
@@ -294,7 +295,7 @@ let netBusy = false; // polling pauses while the page moves the module to a new 
 async function poll() {
   const started = Date.now();
   const res = netBusy ? { ok: false } : await api("GET", "/api/state");
-  if (res.ok) { last = res.data; lastOkAt = Date.now(); render(last); }
+  if (res.ok) { last = res.data; lastOkAt = Date.now(); render(last); await maybeCommitNet(last.net); }
   renderLink();
   setTimeout(poll, Math.max(100, 1000 - (Date.now() - started)));
 }
@@ -407,6 +408,17 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // 1) the ESP32 validates and keeps the settings pending; 2) the page sends them to the module's own
 // configurator; 3) the first request at the new address makes the ESP32 store them as active.
+// A page opened at the pending address proves the module moved there, so it commits the change.
+// Not when the address stays the same: then only the page that sent the module form may commit.
+let commitAt = 0;
+async function maybeCommitNet(n) {
+  if (n.apply !== "pending" || n.pending_ip !== location.hostname || n.ip === location.hostname) return;
+  if (Date.now() - commitAt < 5000) return;
+  commitAt = Date.now();
+  const res = await api("POST", "/api/net/commit");
+  setMsg($("#netMsg"), msgOf(res, res.ok ? "Нові мережеві налаштування збережено" : "Не вдалося зберегти"), res.ok ? "ok" : "bad");
+}
+
 async function applyNet(ip, mask, gw, m) {
   const res = await api("POST", "/api/net", { ip, mask, gw });
   if (!res.ok) { setMsg(m, msgOf(res, "Налаштування не прийнято"), "bad"); return; }
@@ -414,8 +426,15 @@ async function applyNet(ip, mask, gw, m) {
   netBusy = true;
   await chain; // nothing else may talk to the stand while the module switches
   setMsg(m, "Налаштовуємо модуль Ethernet…", "warn");
-  await postNoCors(res.data.module_url + "ip_en.html", "lgk=&post=Login");
-  await postNoCors(res.data.module_url + "ok.html", res.data.module_form);
+  const modUrl = "http://" + location.hostname + ":8000/"; // the address this page reached the module at
+  await postNoCors(modUrl + "ip_en.html", "lgk=&post=Login");
+  await postNoCors(modUrl + "ok.html", res.data.module_form);
+  if (ip === location.hostname) { // mask or gateway only: the page stays where it is
+    await sleep(1000);
+    const c = await api("POST", "/api/net/commit");
+    setMsg(m, msgOf(c, c.ok ? "Нові мережеві налаштування збережено" : "Не вдалося зберегти"), c.ok ? "ok" : "bad");
+    return;
+  }
   setMsg(m, "Перевіряємо нову адресу " + res.data.url + "…", "warn");
   for (let i = 0; i < 10; i++) {
     if (await reachable(res.data.url)) {
@@ -432,7 +451,7 @@ async function applyNet(ip, mask, gw, m) {
   const a = document.createElement("a");
   a.href = res.data.url; a.textContent = res.data.url;
   m.appendChild(a);
-  m.appendChild(document.createTextNode(". Активні налаштування стенда змінюються лише після першого запиту за новою адресою."));
+  m.appendChild(document.createTextNode(". Стенд запише нові налаштування як активні, коли сторінку буде відкрито за новою адресою."));
 }
 
 poll();

@@ -124,11 +124,22 @@ void test_http(void)
     CHECK(fh.requests == 1 && strcmp(fh.last.host, "10.0.0.5") == 0);
     fh = feed_str(&p, "GET / HTTP/1.1\r\n\r\n", 4096, 0);
     CHECK(fh.requests == 1 && fh.last.host[0] == '\0');
+    fh = feed_str(&p, "GET / HTTP/1.1\r\nHost: [fe80::1]:80\r\n\r\n", 4096, 0);
+    CHECK(fh.requests == 1 && fh.last.host[0] == '\0'); // IPv6 literal is not cut into "["
+    fh = feed_str(&p, "GET / HTTP/1.1\r\nHost: 10.0.0.1\r\nHost: 10.0.0.2\r\n\r\n", 4096, 0);
+    CHECK(fh.requests == 1 && strcmp(fh.last.host, "10.0.0.1") == 0);
     char longhost[200] = "GET / HTTP/1.1\r\nHost: ";
     memset(longhost + strlen(longhost), 'a', HTTP_MAX_HOST + 1);
     strcat(longhost, "\r\n\r\n");
     fh = feed_str(&p, longhost, 4096, 0);
     CHECK(fh.requests == 1 && fh.last.host[0] == '\0');
+
+    // A rejected request leaves its first bytes for the log, even though the parser reset its buffer.
+    fh = feed_str(&p, "BREW /pot HTTP/1.1\r\n\r\n", 4096, 0);
+    CHECK(fh.errors == 1 && p.drop_len > 0 && memcmp(p.drop, "BREW /pot", 9) == 0 && p.head_len == 0);
+    http_parser_init(&p);
+    fh = feed_str(&p, "GET /slow HT", 4096, 0);
+    CHECK(http_parser_tick(&p, HTTP_IDLE_TIMEOUT_MS + 1) && memcmp(p.drop, "GET /slow HT", 12) == 0);
 
     // X-Req-Id is echoed into a response header: only short alphanumeric values are kept.
     fh = feed_str(&p, "GET / HTTP/1.1\r\nx-req-id: 42abc\r\n\r\n", 4096, 0);
@@ -162,13 +173,35 @@ void test_http(void)
     CHECK_EQ_INT(fr.requests, 1);
     CHECK(strcmp(fr.last.body, "ip=1.2.3.4") == 0);
 
-    // Junk between requests: one error reply, then the next request parses.
+    // Junk that cannot start a method is skipped silently between requests.
     http_parser_init(&p);
     fr = feed_str(&p, "\r\n\r\n\x01\xffgarbage\r\n\r\nGET /ok HTTP/1.1\r\n\r\n", 3, 0);
+    CHECK_EQ_INT(fr.errors, 0);
+    CHECK_EQ_INT(fr.requests, 1);
+    CHECK(strcmp(fr.last.path, "/ok") == 0);
+    CHECK(p.stats.skipped_bytes == 9);
+
+    // Upper-case junk looks like a method: one error reply, then the next request parses.
+    http_parser_init(&p);
+    fr = feed_str(&p, "GARBAGE\r\n\r\nGET /ok HTTP/1.1\r\n\r\n", 3, 0);
     CHECK_EQ_INT(fr.errors, 1);
     CHECK_EQ_INT(fr.last_status, 400);
     CHECK_EQ_INT(fr.requests, 1);
     CHECK(strcmp(fr.last.path, "/ok") == 0);
+
+    // The 32 bytes UART TO ETH (B) writes to the UART after applying new settings, glued to a request.
+    static const uint8_t module_junk[] = {0x00, 0xff, 0x00, 0xff, 0x00, 0x00, 0x00, 0xfe, 0x00, 0xfe, 0x00,
+                                          0x00, 0xff, 0x00, 0x00, 0x40, 0xff, 0x00, 0x00, 0xa0, 0xfd, 0x01,
+                                          0x00, 0x00, 0x08, 0xa9, 0xff, 0x02, 0x00, 0x00, 0x00, 0x00};
+    http_parser_init(&p);
+    http_event_t ev;
+    size_t used = 0;
+    while (used < sizeof(module_junk)) {
+        used += http_parser_feed(&p, module_junk + used, sizeof(module_junk) - used, 0, &ev);
+        CHECK(ev == HTTP_EV_NONE);
+    }
+    fr = feed_str(&p, "GET /api/state HTTP/1.1\r\n\r\n", 4096, 0);
+    CHECK(fr.requests == 1 && fr.errors == 0 && strcmp(fr.last.path, "/api/state") == 0);
 
     // Header overflow -> 431, skip to end of headers, then continue normally.
     http_parser_init(&p);

@@ -405,15 +405,29 @@ void test_api(void)
     CHECK(has(f, "\"module_url\":\"http://192.168.144.36:8000/\""));
     CHECK(has(f, "lca=192.168.144.50&lcp=80&wbp=8000") && has(f, "lcm=255.255.255.0&lcg=192.168.144.1"));
     CHECK(has(f, "bdr=B&dtb=0&prt=0&stb=0&flc=0&ndr=0") && has(f, "post=Submit"));
-    // Requests at the old address do not apply it; the first one at the new address does.
-    a = call(f, HTTP_GET, "/api/state", NULL, NULL, false);
-    CHECK(!a.net_apply);
-    strcpy(f->host, "stand.local");
+    // Only an explicit commit that arrived at the new address applies it; ordinary requests never do.
     a = call(f, HTTP_GET, "/api/state", NULL, NULL, false);
     CHECK(!a.net_apply);
     strcpy(f->host, "192.168.144.50");
     a = call(f, HTTP_GET, "/api/state", NULL, NULL, false);
+    CHECK(!a.net_apply); // a poll at the new address is not a commit
+    strcpy(f->host, "192.168.144.36");
+    a = call(f, HTTP_POST, "/api/net/commit", NULL, NULL, false);
+    CHECK(!a.net_apply && has(f, "409") && has(f, "wrong_host"));
+    strcpy(f->host, "stand.local");
+    a = call(f, HTTP_POST, "/api/net/commit", NULL, NULL, false);
+    CHECK(!a.net_apply && has(f, "wrong_host"));
+    strcpy(f->host, "192.168.144.50");
+    a = call(f, HTTP_GET, "/api/net/commit", NULL, NULL, false);
+    CHECK(!a.net_apply && has(f, "405"));
+    a = call(f, HTTP_POST, "/api/net/commit", NULL, NULL, false);
     CHECK(a.net_apply && a.net.ip == 0xC0A89032u && a.net.gw == 0xC0A89001u && has(f, "200 OK"));
+    // A second change prepared at the pending address does not commit the first one.
+    a = call(f, HTTP_POST, "/api/net", NULL, "ip=192.168.144.51&mask=255.255.255.0&gw=", false);
+    CHECK(!a.net_apply && f->pending_cfg.ip == 0xC0A89033u);
+    f->pending = false;
+    a = call(f, HTTP_POST, "/api/net/commit", NULL, NULL, false);
+    CHECK(!a.net_apply && has(f, "no_pending"));
     // Without a usable Host the module URL falls back to the active address from the snapshot.
     f->pending = false;
     f->host[0] = '\0';

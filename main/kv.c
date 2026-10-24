@@ -49,3 +49,21 @@ bool kv_set(const char *key, const uint8_t *buf, size_t len)
     }
     return err == ESP_OK;
 }
+
+bool kv_erase(const char *key)
+{
+    if (!s_nvs) {
+        return false;
+    }
+    esp_err_t err = nvs_erase_key(s_nvs, key);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        return true;
+    }
+    if (err == ESP_OK) {
+        err = nvs_commit(s_nvs);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "erase %s failed: %s", key, esp_err_to_name(err));
+    }
+    return err == ESP_OK;
+}

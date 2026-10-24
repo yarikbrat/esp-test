@@ -63,7 +63,7 @@ typedef struct {
     persist_t (*log_config)(void *ctx, const log_cfg_t *cfg); // returns persist result
     bool (*log_clear)(void *ctx);                          // false: already clearing
     size_t (*log_read)(void *ctx, uint32_t before, hl_record_t *out, size_t max, uint32_t *next_before);
-    // Validated settings waiting for the module to move; applied once a request arrives at the new IP.
+    // Validated settings waiting for the module to move; committed by POST /api/net/commit at the new IP.
     void (*net_prepare)(void *ctx, const netcfg_t *cfg);
     bool (*net_pending)(void *ctx, netcfg_t *out);
     const uint8_t *page_gz;
@@ -79,8 +79,8 @@ typedef struct {
     int (*write)(void *ctx, const void *data, size_t len);
 } api_out_t;
 
-// Actions to run after the response has been fully sent. net_apply is set when a request reached the
-// pending address, which proves the module has moved: the platform then stores net as active.
+// Actions to run after the response has been fully sent. net_apply is set by POST /api/net/commit that
+// arrived at the pending address, which proves the module moved: the platform then stores net as active.
 typedef struct {
     bool net_apply;
     netcfg_t net;
