@@ -1,26 +1,64 @@
-#include "altitude.h"
+#include "app.h"
+#include "board.h"
+#include "driver/gpio.h"
 #include "esp_log.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-
-#include <stdint.h>
+#include "flash_part.h"
+#include "kv.h"
 
 static const char *TAG = "main";
 
-extern const uint8_t page_start[] asm("_binary_index_html_start");
-extern const uint8_t page_end[] asm("_binary_index_html_end");
-extern const uint8_t page_gz_start[] asm("_binary_index_html_gz_start");
-extern const uint8_t page_gz_end[] asm("_binary_index_html_gz_end");
+// Task priorities: the bridge answers the browser, sensors keep the 20 Hz cadence, flash work waits.
+#define PRIO_BRIDGE  6
+#define PRIO_SENSORS 5
+#define PRIO_STORAGE 4
+#define PRIO_LOGGER  3
+#define PRIO_BUTTON  2
 
-// Placeholder until the hardware arrives: proves the toolchain, the core and the embedded page link.
+// RST and DEF of the module are active low: keep them released (input with pull-up) unless driven.
+static void release_module_pins(void)
+{
+    gpio_config_t io = {
+        .pin_bit_mask = (1ULL << PIN_MOD_RST) | (1ULL << PIN_MOD_DEF),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+    };
+    gpio_config(&io);
+}
+
+static void open_log(void)
+{
+    uint32_t sectors = flash_part_open(&g_app.flash_ops);
+    xSemaphoreTake(g_app.log_lock, portMAX_DELAY);
+    if (!sectors || histlog_open(&g_app.log, &g_app.flash_ops, sectors) != 0) {
+        ESP_LOGE(TAG, "history log unavailable");
+    }
+    app_refresh_log_stats();
+    xSemaphoreGive(g_app.log_lock);
+    ESP_LOGI(TAG, "history: %u of %u records (corrupt %u)", (unsigned)g_app.log_count,
+             (unsigned)g_app.log_capacity, (unsigned)g_app.log_corrupt);
+    // Not one valid record and no erased slot: the partition was never formatted. Let the logger erase it.
+    if (g_app.log_capacity && g_app.log_count == 0 && g_app.log_corrupt == g_app.log_capacity) {
+        ESP_LOGW(TAG, "history partition holds no log data, erasing it");
+        g_app.log_clear_req = true;
+    }
+}
+
 void app_main(void)
 {
-    float h = 0;
-    altitude_relative_m(100129.4f, 101325.0f, &h);
-    ESP_LOGI(TAG, "core linked, reference altitude %.3f m", h);
-    ESP_LOGI(TAG, "page %u B, gzip %u B", (unsigned)(page_end - page_start),
-             (unsigned)(page_gz_end - page_gz_start));
-    for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
+    release_module_pins();
+    g_app.lock = xSemaphoreCreateMutex();
+    g_app.log_lock = xSemaphoreCreateMutex();
+    g_app.persist_q = xQueueCreate(8, sizeof(uint8_t));
+
+    stand_init(&g_app.stand);
+    kv_init();
+    app_load_settings();
+    open_log();
+    ESP_LOGI(TAG, "session %u", g_app.session);
+
+    xTaskCreate(task_storage, "storage", 3072, NULL, PRIO_STORAGE, NULL);
+    xTaskCreate(task_logger, "logger", 4096, NULL, PRIO_LOGGER, &g_app.logger_task);
+    xTaskCreate(task_sensors, "sensors", 4096, NULL, PRIO_SENSORS, NULL);
+    xTaskCreate(task_bridge, "bridge", 6144, NULL, PRIO_BRIDGE, NULL);
+    xTaskCreate(task_button, "button", 2560, NULL, PRIO_BUTTON, NULL);
 }
