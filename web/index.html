@@ -132,7 +132,7 @@ a{color:var(--acc)}
     <form id="netForm" class="form" novalidate>
       <div><label for="fIp">IP-адреса</label><input id="fIp" name="ip" autocomplete="off" required></div>
       <div><label for="fMask">Маска</label><input id="fMask" name="mask" autocomplete="off" required></div>
-      <div><label for="fGw">Шлюз (необов'язково)</label><input id="fGw" name="gw" autocomplete="off"></div>
+      <div><label for="fGw">Шлюз (необов'язково)</label><input id="fGw" name="gw" autocomplete="off" placeholder="порожньо, якщо роутера немає"></div>
       <div><button class="primary" type="submit">Зберегти та застосувати</button></div>
     </form>
     <div class="msg" id="netMsg" role="status" aria-live="polite"></div>
@@ -459,7 +459,10 @@ $("#netForm").addEventListener("submit", async ev => {
   const ip = $("#fIp").value.trim(), mask = $("#fMask").value.trim(), gw = $("#fGw").value.trim(), m = $("#netMsg");
   if (!IP_RE.test(ip)) { setMsg(m, "Невірний формат IP-адреси", "bad"); return; }
   if (!IP_RE.test(mask)) { setMsg(m, "Невірний формат маски", "bad"); return; }
-  if (gw && !IP_RE.test(gw)) { setMsg(m, "Невірний формат шлюзу", "bad"); return; }
+  if (gw && !IP_RE.test(gw)) {
+    setMsg(m, "Шлюз — це IP-адреса роутера в тій самій мережі, наприклад 192.168.144.1. Якщо роутера немає, залиште поле порожнім.", "bad");
+    return;
+  }
   const port = last ? last.net.port : 80;
   const url = "http://" + ip + (port === 80 ? "" : ":" + port) + "/";
   if (!confirm("Стенд перейде на адресу " + url + "\nКомп'ютер має бути в тій самій мережі, інакше сторінка стане недоступною." +
