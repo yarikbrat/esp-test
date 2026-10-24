@@ -20,6 +20,13 @@ void test_altitude(void)
     CHECK(altitude_relative_m(101324.0f, 101325.0f, &h));
     CHECK(h > 0.05f && h < 0.12f);
 
+    // The reference cases of docs/TEST_PROTOCOL.md, section 5.
+    CHECK(altitude_relative_m(101205.0f, 101325.0f, &h));
+    CHECK_NEAR(h, 9.996, 0.01);
+    CHECK(altitude_relative_m(101445.0f, 101325.0f, &h));
+    CHECK_NEAR(h, -9.986, 0.01);
+    CHECK(altitude_relative_m(97770.0f, 97887.6f, &h));
+    CHECK_NEAR(h, 10.140, 0.01);
     h = 42.0f;
     CHECK(!altitude_relative_m(NAN, 101325.0f, &h));
     CHECK(!altitude_relative_m(101325.0f, NAN, &h));
