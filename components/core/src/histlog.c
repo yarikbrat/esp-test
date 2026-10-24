@@ -142,6 +142,23 @@ int histlog_append(histlog_t *hl, hl_record_t *rec)
     return -3;
 }
 
+int histlog_format(histlog_t *hl)
+{
+    for (uint32_t s = 0; s < hl->n_sectors; s++) {
+        int err = hl->fl->erase_sector(hl->fl->ctx, s * hl->fl->sector_size);
+        if (err) {
+            hl->write_errors++;
+            hl->last_error = err;
+            return err; // partly erased; the next open() rescan gives the true state
+        }
+    }
+    hl->next_seq = 0;
+    hl->oldest_seq = 0;
+    hl->corrupt = 0;
+    hl->last_error = 0;
+    return 0;
+}
+
 int histlog_clear(histlog_t *hl)
 {
     hl_record_t mark;

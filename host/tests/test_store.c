@@ -227,6 +227,20 @@ void test_histlog(void)
     CHECK_EQ_INT(histlog_append(&hl, &r), 0); // slot 0 starts a sector, gets erased
     CHECK_EQ_INT(histlog_count(&hl), 1);
 
+    // Formatting garbage: every slot blank again, nothing corrupt after a reboot; a failed erase is reported.
+    memset(fe.mem, 0x5A, fe.size);
+    CHECK_EQ_INT(histlog_open(&hl, &ops, 4), 0);
+    fe.fail_erase = true;
+    CHECK(histlog_format(&hl) != 0);
+    CHECK(hl.last_error != 0);
+    fe.fail_erase = false;
+    CHECK_EQ_INT(histlog_format(&hl), 0);
+    CHECK_EQ_INT(histlog_open(&hl, &ops, 4), 0);
+    CHECK_EQ_INT(hl.corrupt, 0);
+    CHECK_EQ_INT(histlog_count(&hl), 0);
+    append_n(&hl, 3);
+    CHECK_EQ_INT(histlog_count(&hl), 3);
+
     flash_emu_free(&fe);
 }
 

@@ -32,15 +32,18 @@ static void open_log(void)
     if (!sectors || histlog_open(&g_app.log, &g_app.flash_ops, sectors) != 0) {
         ESP_LOGE(TAG, "history log unavailable");
     }
+    ESP_LOGI(TAG, "history: %u of %u records (corrupt %u)", (unsigned)histlog_count(&g_app.log),
+             (unsigned)g_app.log.capacity, (unsigned)g_app.log.corrupt);
+    // Not one valid record and no erased slot: the partition was never formatted. No task runs yet,
+    // so the long erase stalls nothing.
+    if (g_app.log.capacity && histlog_count(&g_app.log) == 0 && g_app.log.corrupt == g_app.log.capacity) {
+        ESP_LOGW(TAG, "history partition holds no log data, formatting it");
+        if (histlog_format(&g_app.log) != 0) {
+            ESP_LOGE(TAG, "format failed (%d)", g_app.log.last_error);
+        }
+    }
     app_refresh_log_stats();
     xSemaphoreGive(g_app.log_lock);
-    ESP_LOGI(TAG, "history: %u of %u records (corrupt %u)", (unsigned)g_app.log_count,
-             (unsigned)g_app.log_capacity, (unsigned)g_app.log_corrupt);
-    // Not one valid record and no erased slot: the partition was never formatted. Let the logger erase it.
-    if (g_app.log_capacity && g_app.log_count == 0 && g_app.log_corrupt == g_app.log_capacity) {
-        ESP_LOGW(TAG, "history partition holds no log data, erasing it");
-        g_app.log_clear_req = true;
-    }
 }
 
 void app_main(void)

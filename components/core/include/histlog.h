@@ -64,6 +64,9 @@ int histlog_append(histlog_t *hl, hl_record_t *rec);
 // Clears logically by appending a marker: no mass erase, so flash stays free for other tasks.
 int histlog_clear(histlog_t *hl);
 
+// Erases every sector (seconds of flash stalls): only for formatting at boot, before the tasks start.
+int histlog_format(histlog_t *hl);
+
 uint32_t histlog_count(const histlog_t *hl);
 
 // Reads up to max records with seq < before_seq, newest first (HL_SEQ_EMPTY = from newest).
