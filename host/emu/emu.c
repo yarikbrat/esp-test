@@ -373,6 +373,18 @@ static bool be_net_pending(void *ctx, netcfg_t *out)
     return p;
 }
 
+static bool be_net_cancel(void *ctx)
+{
+    (void)ctx;
+    pthread_mutex_lock(&g_lock);
+    bool p = g_net_apply == NET_APPLY_PENDING;
+    if (p) {
+        g_net_apply = NET_APPLY_IDLE;
+    }
+    pthread_mutex_unlock(&g_lock);
+    return p;
+}
+
 static void net_apply(const netcfg_t *cfg)
 {
     char ip[16];
@@ -597,7 +609,7 @@ int main(int argc, char **argv)
     api_backend_t be = {
         .snapshot = be_snapshot, .zero_start = be_zero_start, .zero_reset = be_zero_reset,
         .log_config = be_log_config, .log_clear = be_log_clear, .log_read = be_log_read,
-        .net_prepare = be_net_prepare, .net_pending = be_net_pending, .http_port = (uint16_t)g_opt.port,
+        .net_prepare = be_net_prepare, .net_pending = be_net_pending, .net_cancel = be_net_cancel, .http_port = (uint16_t)g_opt.port,
     };
     api_out_t out = {.write = bridge_write};
     if (!load_page()) {
@@ -666,7 +678,8 @@ int main(int argc, char **argv)
                     }
                 } else if (ev == HTTP_EV_ERROR) {
                     printf("[http] error %d\n", g_parser.error_status);
-                    api_send_error(&out, g_parser.error_status, g_parser.error_head, scratch, sizeof(scratch));
+                    api_send_error(&out, g_parser.error_status, g_parser.error_head, g_parser.req.rid, scratch,
+                                   sizeof(scratch));
                 }
             }
         }

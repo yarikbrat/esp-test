@@ -93,7 +93,7 @@ static int send(const api_out_t *out, int status, const char *ctype, const void 
     char head[320], hdrs[96];
     int hl = snprintf(hdrs, sizeof(hdrs), "%s%s", extra ? extra : "", s_rid_header);
     if (hl < 0 || (size_t)hl >= sizeof(hdrs)) {
-        snprintf(hdrs, sizeof(hdrs), "%s", extra ? extra : ""); // never send a header cut mid-line
+        return -1; // a header cut mid-line would desync every client on the shared stream
     }
     size_t n = http_format_head(head, sizeof(head), status, ctype, len, hdrs[0] ? hdrs : NULL);
     if (n == 0) {
@@ -407,7 +407,8 @@ api_after_t api_handle(const api_backend_t *b, const http_request_t *req, const 
     }
     // Remaining routes are POST-only; anything else is 405 for a known path, 404 otherwise.
     static const char *const post_routes[] = {"/api/zero", "/api/zero/reset", "/api/log/config",
-                                              "/api/log/clear", "/api/net", "/api/net/commit"};
+                                              "/api/log/clear", "/api/net", "/api/net/commit",
+                                              "/api/net/cancel"};
     static const char *const get_routes[] = {"/api/state", "/api/log"};
     bool post_route = false, get_route = false;
     for (size_t i = 0; i < sizeof(post_routes) / sizeof(post_routes[0]); i++) {
@@ -473,12 +474,21 @@ api_after_t api_handle(const api_backend_t *b, const http_request_t *req, const 
         } else {
             send_fail(out, 409, "busy", "Очищення вже виконується", scratch, cap);
         }
+    } else if (strcmp(path, "/api/net/cancel") == 0) {
+        if (b->net_cancel && b->net_cancel(b->ctx)) {
+            send_ok(out, "Зміну мережевих налаштувань скасовано", scratch, cap);
+        } else {
+            send_fail(out, 409, "no_pending", "Немає змін мережі, що очікують застосування", scratch, cap);
+        }
     } else if (strcmp(path, "/api/net/commit") == 0) {
-        // Sent by the page once it reached the new address; arriving there proves the module moved.
+        // Sent by the page once it reached the new address; arriving there proves the module moved. When the
+        // IP stays the same (mask or gateway only) the address proves nothing, so the page's request suffices.
         netcfg_t pending;
+        api_snapshot_t snap;
+        b->snapshot(b->ctx, &snap);
         if (!b->net_pending || !b->net_pending(b->ctx, &pending)) {
             send_fail(out, 409, "no_pending", "Немає змін мережі, що очікують застосування", scratch, cap);
-        } else if (!host_is_ip || host_ip != pending.ip) {
+        } else if (pending.ip != snap.net.ip && (!host_is_ip || host_ip != pending.ip)) {
             send_fail(out, 409, "wrong_host", "Запит надійшов не на нову адресу стенда", scratch, cap);
         } else {
             send_ok(out, "Нові мережеві налаштування збережено", scratch, cap);
@@ -500,14 +510,14 @@ api_after_t api_handle(const api_backend_t *b, const http_request_t *req, const 
             send_fail(out, 422, netcfg_err_code(err), netcfg_err_text(err), scratch, cap);
             return after;
         }
-        if (b->net_prepare) {
-            b->net_prepare(b->ctx, &cfg);
-        }
         // The page sends module_form to the module itself; this ESP32 cannot reach its configurator.
         char form[400], url[40], mod_url[40], mod_host[16];
         if (!uart_eth_form(&cfg, form, sizeof(form))) {
             send_fail(out, 500, "internal", "Внутрішня помилка", scratch, cap);
             return after;
+        }
+        if (b->net_prepare) { // only once the reply can be built, so nothing is left pending on failure
+            b->net_prepare(b->ctx, &cfg);
         }
         netcfg_format_ipv4(cfg.ip, ip, sizeof(ip));
         if (b->http_port == 80) {
@@ -541,9 +551,14 @@ api_after_t api_handle(const api_backend_t *b, const http_request_t *req, const 
     return after;
 }
 
-void api_send_error(const api_out_t *out, int status, bool head_only, char *scratch, size_t cap)
+void api_send_error(const api_out_t *out, int status, bool head_only, const char *rid, char *scratch, size_t cap)
 {
-    s_rid_header[0] = '\0'; // the failed request was never parsed
+    // Headers are parsed before the request line, so the id is known for most rejected requests.
+    if (rid && rid[0]) {
+        snprintf(s_rid_header, sizeof(s_rid_header), "X-Req-Id: %s\r\n", rid);
+    } else {
+        s_rid_header[0] = '\0';
+    }
     const char *msg;
     switch (status) {
     case 413: msg = "Запит завеликий"; break;

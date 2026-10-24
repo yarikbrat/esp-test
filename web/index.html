@@ -133,6 +133,9 @@ a{color:var(--acc)}
       <div><button class="primary" type="submit">Зберегти та застосувати</button></div>
     </form>
     <div class="msg" id="netMsg" role="status" aria-live="polite"></div>
+    <div class="msg warn" id="netPending" hidden>Зміна мережевих налаштувань (адреса <span id="netPendIp"></span>) очікує підтвердження.
+      Підтвердіть, якщо модуль Ethernet уже працює з новими налаштуваннями, або скасуйте.
+      <div class="actions"><button id="netConfirm">Підтвердити</button><button id="netCancel">Скасувати</button></div></div>
     <div class="note">Адресу зберігає сам модуль Ethernet, ESP32 записує її у свою пам'ять, коли стенд відповів за новою адресою. Якщо доступ втрачено: знайдіть модуль програмою VirCom (Search) або командою <code>arp -a</code>, відкрийте його налаштування на порту 8000 і поверніть 192.168.144.36; потім утримуйте BOOT на ESP32 5 с, щоб і ESP32 повернулася до початкових налаштувань. Докладно — у README.</div>
   </section>
   <div class="note" id="diag"></div>
@@ -159,8 +162,7 @@ function api(method, path, body) {
         opt.headers["Content-Type"] = "application/x-www-form-urlencoded";
       }
       const r = await fetch(path, opt);
-      const got = r.headers.get("X-Req-Id");
-      if (got !== null && got !== rid) { // a reply without an id is a parser error for this request
+      if (r.headers.get("X-Req-Id") !== rid) { // error replies carry the id too
         crossTalkAt = Date.now();
         return { ok: false, status: r.status, data: null, crossTalk: true };
       }
@@ -267,6 +269,8 @@ function renderNet(n) {
   else { link.textContent = n.link.cable ? "кабель підключено" : "кабель відключено"; link.className = n.link.cable ? "ok" : "bad"; }
   if (!netFormTouched) { $("#fIp").value = n.ip; $("#fMask").value = n.mask; $("#fGw").value = n.gw || ""; }
   if (n.apply === "failed" && n.apply_msg) setMsg($("#netMsg"), n.apply_msg, "bad");
+  $("#netPending").hidden = n.apply !== "pending" || netBusy;
+  $("#netPendIp").textContent = n.pending_ip || "";
 }
 
 function render(s) {
@@ -407,17 +411,27 @@ async function reachable(url) {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // 1) the ESP32 validates and keeps the settings pending; 2) the page sends them to the module's own
-// configurator; 3) the first request at the new address makes the ESP32 store them as active.
+// configurator; 3) POST /api/net/commit at the new address makes the ESP32 store them as active.
 // A page opened at the pending address proves the module moved there, so it commits the change.
-// Not when the address stays the same: then only the page that sent the module form may commit.
+// Not when the address stays the same: then only the page that sent the module form commits, or the user
+// presses "Підтвердити".
 let commitAt = 0;
 async function maybeCommitNet(n) {
-  if (n.apply !== "pending" || n.pending_ip !== location.hostname || n.ip === location.hostname) return;
+  if (netBusy || n.apply !== "pending" || n.pending_ip !== location.hostname || n.ip === location.hostname) return;
   if (Date.now() - commitAt < 5000) return;
   commitAt = Date.now();
   const res = await api("POST", "/api/net/commit");
+  if (!res.ok && res.data && res.data.error === "no_pending") return; // another page committed first
   setMsg($("#netMsg"), msgOf(res, res.ok ? "Нові мережеві налаштування збережено" : "Не вдалося зберегти"), res.ok ? "ok" : "bad");
 }
+$("#netConfirm").addEventListener("click", async () => {
+  const res = await api("POST", "/api/net/commit");
+  setMsg($("#netMsg"), msgOf(res, res.ok ? "Нові мережеві налаштування збережено" : "Не вдалося зберегти"), res.ok ? "ok" : "bad");
+});
+$("#netCancel").addEventListener("click", async () => {
+  const res = await api("POST", "/api/net/cancel");
+  setMsg($("#netMsg"), msgOf(res, res.ok ? "Зміну скасовано" : "Не вдалося скасувати"), res.ok ? "ok" : "bad");
+});
 
 async function applyNet(ip, mask, gw, m) {
   const res = await api("POST", "/api/net", { ip, mask, gw });
@@ -426,10 +440,9 @@ async function applyNet(ip, mask, gw, m) {
   netBusy = true;
   await chain; // nothing else may talk to the stand while the module switches
   setMsg(m, "Налаштовуємо модуль Ethernet…", "warn");
-  const modUrl = "http://" + location.hostname + ":8000/"; // the address this page reached the module at
-  await postNoCors(modUrl + "ip_en.html", "lgk=&post=Login");
-  await postNoCors(modUrl + "ok.html", res.data.module_form);
-  if (ip === location.hostname) { // mask or gateway only: the page stays where it is
+  await postNoCors(res.data.module_url + "ip_en.html", "lgk=&post=Login");
+  await postNoCors(res.data.module_url + "ok.html", res.data.module_form);
+  if (last && ip === last.net.ip) { // mask or gateway only: the page stays where it is
     await sleep(1000);
     const c = await api("POST", "/api/net/commit");
     setMsg(m, msgOf(c, c.ok ? "Нові мережеві налаштування збережено" : "Не вдалося зберегти"), c.ok ? "ok" : "bad");

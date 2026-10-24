@@ -70,11 +70,16 @@ void task_bridge(void *arg)
             } else if (ev == HTTP_EV_ERROR) {
                 ESP_LOGW(TAG, "bad request, status %d", s_parser.error_status);
                 log_drop("rejected request starts with");
-                api_send_error(&out, s_parser.error_status, s_parser.error_head, s_scratch, sizeof(s_scratch));
+                api_send_error(&out, s_parser.error_status, s_parser.error_head, s_parser.req.rid, s_scratch,
+                               sizeof(s_scratch));
             }
         }
         if (http_parser_tick(&s_parser, app_now_ms())) {
-            log_drop("incomplete request dropped (timeout), it started with");
+            if (s_parser.drop_len) {
+                log_drop("incomplete request dropped (timeout), it started with");
+            } else {
+                ESP_LOGW(TAG, "body of a rejected request never arrived (timeout)");
+            }
         }
         app_lock();
         g_app.http = s_parser.stats;

@@ -202,6 +202,13 @@ static void f_prepare(void *ctx, const netcfg_t *c)
     f->pending = true;
     f->pending_cfg = *c;
 }
+static bool f_cancel(void *ctx)
+{
+    fake_t *f = ctx;
+    bool p = f->pending;
+    f->pending = false;
+    return p;
+}
 static bool f_pending(void *ctx, netcfg_t *out)
 {
     fake_t *f = ctx;
@@ -248,7 +255,7 @@ static api_after_t call(fake_t *f, http_method_t m, const char *path, const char
     api_backend_t b = {
         .ctx = f, .snapshot = f_snapshot, .zero_start = f_zero, .zero_reset = f_reset,
         .log_config = f_cfg, .log_clear = f_clear, .log_read = f_read,
-        .net_prepare = f_prepare, .net_pending = f_pending,
+        .net_prepare = f_prepare, .net_pending = f_pending, .net_cancel = f_cancel,
         .page = page, .page_len = sizeof(page) - 1, .page_gz = page_gz, .page_gz_len = 2,
         .http_port = 80,
     };
@@ -368,6 +375,17 @@ void test_api(void)
     f->rid[0] = '\0';
     call(f, HTTP_GET, "/api/state", NULL, NULL, false);
     CHECK(!has(f, "X-Req-Id"));
+    // Parser errors echo the id too, so the page can tell its own error from another client's.
+    {
+        api_out_t eo = {.ctx = f, .write = f_write};
+        char sc[512];
+        f->out_len = 0;
+        api_send_error(&eo, 413, false, "99", sc, sizeof(sc));
+        CHECK(has(f, "413") && has(f, "X-Req-Id: 99\r\n"));
+        f->out_len = 0;
+        api_send_error(&eo, 400, false, "", sc, sizeof(sc));
+        CHECK(has(f, "400") && !has(f, "X-Req-Id"));
+    }
 
     // Open pages are counted by X-Client-Id within a 3 s window; requests without an id are not counted.
     f->snap.now_ms = 100000;
@@ -428,6 +446,19 @@ void test_api(void)
     f->pending = false;
     a = call(f, HTTP_POST, "/api/net/commit", NULL, NULL, false);
     CHECK(!a.net_apply && has(f, "no_pending"));
+    // Mask or gateway only (pending IP == active IP): the address proves nothing, any host may commit.
+    f->snap.net.ip = 0xC0A89024u; // active 192.168.144.36
+    strcpy(f->host, "stand.local");
+    a = call(f, HTTP_POST, "/api/net", NULL, "ip=192.168.144.36&mask=255.255.255.128&gw=", false);
+    CHECK(!a.net_apply && f->pending);
+    a = call(f, HTTP_POST, "/api/net/commit", NULL, NULL, false);
+    CHECK(a.net_apply && a.net.mask == 0xFFFFFF80u);
+    // Cancel drops a pending change; with nothing pending it reports that.
+    f->pending = true;
+    a = call(f, HTTP_POST, "/api/net/cancel", NULL, NULL, false);
+    CHECK(!a.net_apply && has(f, "200 OK") && !f->pending);
+    a = call(f, HTTP_POST, "/api/net/cancel", NULL, NULL, false);
+    CHECK(has(f, "409") && has(f, "no_pending"));
     // Without a usable Host the module URL falls back to the active address from the snapshot.
     f->pending = false;
     f->host[0] = '\0';

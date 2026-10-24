@@ -189,6 +189,31 @@ void test_http(void)
     CHECK_EQ_INT(fr.requests, 1);
     CHECK(strcmp(fr.last.path, "/ok") == 0);
 
+    // Noise with A-Z bytes glued in front of a request line: the request is recovered from the line.
+    http_parser_init(&p);
+    fr = feed_str(&p, "\x01QZ\xff" "AGET /api/state HTTP/1.1\r\nX-Req-Id: 5\r\n\r\n", 4096, 0);
+    CHECK(fr.requests == 1 && fr.errors == 0 && strcmp(fr.last.path, "/api/state") == 0);
+    CHECK(strcmp(fr.last.rid, "5") == 0);
+    // A timeout while skipping a rejected body does not overwrite the rejected request's snippet with junk.
+    http_parser_init(&p);
+    fr = feed_str(&p, "BREW /x HTTP/1.1\r\nContent-Length: 10\r\n\r\nab", 4096, 0);
+    CHECK(fr.errors == 1 && p.drop_len > 0);
+    CHECK(http_parser_tick(&p, HTTP_IDLE_TIMEOUT_MS + 1) && p.drop_len == 0);
+    // 431: headers never parsed, so the previous request's id must not be echoed.
+    http_parser_init(&p);
+    fr = feed_str(&p, "GET / HTTP/1.1\r\nX-Req-Id: 7\r\n\r\n", 4096, 0);
+    CHECK(strcmp(p.req.rid, "7") == 0);
+    char huge[HTTP_MAX_HEAD + 64] = "GET / HTTP/1.1\r\nX-Pad: ";
+    memset(huge + strlen(huge), 'b', HTTP_MAX_HEAD);
+    huge[sizeof(huge) - 1] = '\0';
+    fr = feed_str(&p, huge, 4096, 0);
+    CHECK(fr.errors == 1 && fr.last_status == 431 && p.req.rid[0] == '\0');
+
+    // A clean unknown method is still reported, not mistaken for noise.
+    http_parser_init(&p);
+    fr = feed_str(&p, "PATCH /x HTTP/1.1\r\n\r\n", 4096, 0);
+    CHECK(fr.errors == 1 && fr.last_status == 501);
+
     // The 32 bytes UART TO ETH (B) writes to the UART after applying new settings, glued to a request.
     static const uint8_t module_junk[] = {0x00, 0xff, 0x00, 0xff, 0x00, 0x00, 0x00, 0xfe, 0x00, 0xfe, 0x00,
                                           0x00, 0xff, 0x00, 0x00, 0x40, 0xff, 0x00, 0x00, 0xa0, 0xfd, 0x01,

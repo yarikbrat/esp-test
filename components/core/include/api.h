@@ -66,6 +66,7 @@ typedef struct {
     // Validated settings waiting for the module to move; committed by POST /api/net/commit at the new IP.
     void (*net_prepare)(void *ctx, const netcfg_t *cfg);
     bool (*net_pending)(void *ctx, netcfg_t *out);
+    bool (*net_cancel)(void *ctx); // false: nothing was pending
     const uint8_t *page_gz;
     size_t page_gz_len;
     const uint8_t *page;
@@ -90,8 +91,9 @@ typedef struct {
 api_after_t api_handle(const api_backend_t *b, const http_request_t *req, const api_out_t *out,
                        char *scratch, size_t scratch_cap);
 
-// Replies to a parser error (400/413/431/...); pass parser->error_head as head_only.
-void api_send_error(const api_out_t *out, int status, bool head_only, char *scratch, size_t scratch_cap);
+// Replies to a parser error (400/413/431/...); pass parser->error_head as head_only and parser->req.rid.
+void api_send_error(const api_out_t *out, int status, bool head_only, const char *rid, char *scratch,
+                    size_t scratch_cap);
 
 const char *api_sensor_status_code(sensor_status_t st);
 const char *api_sensor_status_text(sensor_status_t st);

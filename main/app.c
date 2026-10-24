@@ -33,8 +33,12 @@ void app_load_settings(void)
     // Settings sent to the module but not yet confirmed at the new address survive a reboot.
     n = kv_get("netp", buf, sizeof(buf));
     if (n && st_decode_net(buf, n, &g_app.net_pending) == ST_LOADED) {
-        g_app.net_apply = NET_APPLY_PENDING;
-        ESP_LOGI(TAG, "net: change pending, waiting for a commit at the new address");
+        if (memcmp(&g_app.net_pending, &g_app.net, sizeof(netcfg_t)) == 0) {
+            kv_erase("netp"); // power was cut after "net" was saved but before "netp" was erased
+        } else {
+            g_app.net_apply = NET_APPLY_PENDING;
+            ESP_LOGI(TAG, "net: change pending, waiting for a commit at the new address");
+        }
     }
     n = kv_get("log", buf, sizeof(buf));
     g_app.log_origin = st_decode_log(n ? buf : NULL, n, &g_app.log_cfg);
@@ -222,6 +226,22 @@ static void be_net_prepare(void *ctx, const netcfg_t *cfg)
              saved ? "" : " (not saved, lost on reboot)");
 }
 
+static bool be_net_cancel(void *ctx)
+{
+    (void)ctx;
+    app_lock();
+    bool p = g_app.net_apply == NET_APPLY_PENDING;
+    if (p) {
+        g_app.net_apply = NET_APPLY_IDLE;
+    }
+    app_unlock();
+    if (p) {
+        kv_erase("netp");
+        ESP_LOGI(TAG, "pending net change cancelled");
+    }
+    return p;
+}
+
 static bool be_net_pending(void *ctx, netcfg_t *out)
 {
     (void)ctx;
@@ -245,6 +265,7 @@ api_backend_t app_backend(void)
         .log_read = be_log_read,
         .net_prepare = be_net_prepare,
         .net_pending = be_net_pending,
+        .net_cancel = be_net_cancel,
         .page = page_start,
         .page_len = (size_t)(page_end - page_start),
         .page_gz = page_gz_start,
@@ -264,7 +285,9 @@ void app_net_apply(const netcfg_t *cfg)
     uint8_t buf[ST_NET_BLOB_SIZE];
     size_t n = st_encode_net(cfg, buf, sizeof(buf));
     bool ok = n && kv_set("net", buf, n);
-    kv_erase("netp");
+    if (ok) {
+        kv_erase("netp"); // keep the pending record if "net" could not be saved
+    }
     app_lock();
     g_app.net = *cfg; // the module already answers at this address, saved or not
     if (ok) {

@@ -191,6 +191,32 @@ static int parse_request_line(http_request_t *r, char *h, size_t line_len)
 
 // Parses the collected head. Returns 0 or an HTTP error status; p->body_need is the body length
 // whenever it could be determined, even on error.
+// Line noise that happens to contain A-Z bytes ends up glued in front of a real request line. If the
+// first line holds a known method token after some prefix, drop the prefix so the request survives.
+static void strip_noise(http_parser_t *p)
+{
+    static const char *const tokens[] = {"GET /", "HEAD /", "POST /"};
+    char *eol = memchr(p->head, '\n', p->head_len);
+    size_t line = eol ? (size_t)(eol - p->head) : p->head_len;
+    size_t best = 0;
+    for (size_t t = 0; t < sizeof(tokens) / sizeof(tokens[0]); t++) {
+        size_t tl = strlen(tokens[t]);
+        for (size_t i = 1; i + tl <= line; i++) {
+            if (memcmp(p->head + i, tokens[t], tl) == 0) {
+                if (!best || i < best) {
+                    best = i;
+                }
+                break;
+            }
+        }
+    }
+    if (best) {
+        memmove(p->head, p->head + best, p->head_len - best);
+        p->head_len -= best;
+        p->stats.skipped_bytes += (uint32_t)best;
+    }
+}
+
 static int parse_head(http_parser_t *p)
 {
     memset(&p->req, 0, sizeof(p->req));
@@ -269,6 +295,7 @@ size_t http_parser_feed(http_parser_t *p, const uint8_t *data, size_t len, uint3
                           ((uint32_t)(uint8_t)p->head[p->head_len - 2] << 8) |
                           (uint8_t)p->head[p->head_len - 1];
                 p->error_head = memcmp(p->head, "HEAD ", 5) == 0;
+                p->req.rid[0] = '\0'; // headers were never parsed: do not echo the previous request's id
                 note_drop(p);
                 fail(p, 431, ev);
                 return i;
@@ -276,6 +303,7 @@ size_t http_parser_feed(http_parser_t *p, const uint8_t *data, size_t len, uint3
             p->head[p->head_len++] = (char)c;
             i++;
             if (head_complete(p->head, p->head_len)) {
+                strip_noise(p);
                 int status = parse_head(p);
                 if (status != 0) {
                     // Skip a body of known, modest length so it is not parsed as the next request.
@@ -352,7 +380,11 @@ bool http_parser_tick(http_parser_t *p, uint32_t now_ms)
     }
     if (now_ms - p->last_ms > HTTP_IDLE_TIMEOUT_MS || now_ms - p->start_ms > HTTP_TOTAL_TIMEOUT_MS) {
         p->stats.timeouts++;
-        note_drop(p); // empty when the timeout hit while skipping a rejected body
+        if (p->state == ST_HEAD) {
+            note_drop(p);
+        } else {
+            p->drop_len = 0; // timed out while skipping: the rejected request was already reported
+        }
         http_parser_reset(p);
         return true;
     }
