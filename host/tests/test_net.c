@@ -194,6 +194,18 @@ void test_http(void)
     fr = feed_str(&p, "\x01QZ\xff" "AGET /api/state HTTP/1.1\r\nX-Req-Id: 5\r\n\r\n", 4096, 0);
     CHECK(fr.requests == 1 && fr.errors == 0 && strcmp(fr.last.path, "/api/state") == 0);
     CHECK(strcmp(fr.last.rid, "5") == 0);
+    // Noise containing a newline: the real request is on the second line of the buffer.
+    http_parser_init(&p);
+    fr = feed_str(&p, "\x02ZQ\nXGET /api/state HTTP/1.1\r\n\r\n", 4096, 0);
+    CHECK(fr.requests == 1 && fr.errors == 0 && strcmp(fr.last.path, "/api/state") == 0);
+    // A valid request keeps its line even if a header mentions a method.
+    fr = feed_str(&p, "GET /a HTTP/1.1\r\nX-Note: POST /b HTTP/1.1\r\n\r\n", 4096, 0);
+    CHECK(fr.requests == 1 && strcmp(fr.last.path, "/a") == 0);
+    // A body that never arrives: the timeout keeps the head of the accepted request for the log.
+    http_parser_init(&p);
+    fr = feed_str(&p, "POST /api/net HTTP/1.1\r\nContent-Length: 30\r\n\r\nip=1", 4096, 0);
+    CHECK(http_parser_tick(&p, HTTP_IDLE_TIMEOUT_MS + 1) && p.drop_len > 0 && memcmp(p.drop, "POST /api/net", 13) == 0);
+
     // A timeout while skipping a rejected body does not overwrite the rejected request's snippet with junk.
     http_parser_init(&p);
     fr = feed_str(&p, "BREW /x HTTP/1.1\r\nContent-Length: 10\r\n\r\nab", 4096, 0);

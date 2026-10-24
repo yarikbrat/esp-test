@@ -420,7 +420,7 @@ void test_api(void)
     a = call(f, HTTP_POST, "/api/net", NULL, "ip=192.168.144.50&mask=255.255.255.0&gw=192.168.144.1", false);
     CHECK(has(f, "200 OK") && has(f, "\"url\":\"http://192.168.144.50/\"") && !a.net_apply);
     CHECK(f->prepare_calls == 1 && f->pending_cfg.ip == 0xC0A89032u && f->pending_cfg.gw == 0xC0A89001u);
-    CHECK(has(f, "\"module_url\":\"http://192.168.144.36:8000/\""));
+    CHECK(has(f, "\"module_url\":\"http://192.168.144.36:8000/\"") && has(f, "\"same_ip\":false"));
     CHECK(has(f, "lca=192.168.144.50&lcp=80&wbp=8000") && has(f, "lcm=255.255.255.0&lcg=192.168.144.1"));
     CHECK(has(f, "bdr=B&dtb=0&prt=0&stb=0&flc=0&ndr=0") && has(f, "post=Submit"));
     // Only an explicit commit that arrived at the new address applies it; ordinary requests never do.
@@ -450,7 +450,7 @@ void test_api(void)
     f->snap.net.ip = 0xC0A89024u; // active 192.168.144.36
     strcpy(f->host, "stand.local");
     a = call(f, HTTP_POST, "/api/net", NULL, "ip=192.168.144.36&mask=255.255.255.128&gw=", false);
-    CHECK(!a.net_apply && f->pending);
+    CHECK(!a.net_apply && f->pending && has(f, "\"same_ip\":true"));
     a = call(f, HTTP_POST, "/api/net/commit", NULL, NULL, false);
     CHECK(a.net_apply && a.net.mask == 0xFFFFFF80u);
     // Cancel drops a pending change; with nothing pending it reports that.

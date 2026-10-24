@@ -377,7 +377,7 @@ static bool be_net_cancel(void *ctx)
 {
     (void)ctx;
     pthread_mutex_lock(&g_lock);
-    bool p = g_net_apply == NET_APPLY_PENDING;
+    bool p = g_net_apply == NET_APPLY_PENDING || g_net_apply == NET_APPLY_FAILED;
     if (p) {
         g_net_apply = NET_APPLY_IDLE;
     }

@@ -226,17 +226,19 @@ static void be_net_prepare(void *ctx, const netcfg_t *cfg)
              saved ? "" : " (not saved, lost on reboot)");
 }
 
+// Also clears a change left behind by a failed save, so it cannot come back after a reboot.
 static bool be_net_cancel(void *ctx)
 {
     (void)ctx;
     app_lock();
-    bool p = g_app.net_apply == NET_APPLY_PENDING;
+    bool p = g_app.net_apply == NET_APPLY_PENDING || g_app.net_apply == NET_APPLY_FAILED;
     if (p) {
         g_app.net_apply = NET_APPLY_IDLE;
+        g_app.net_apply_msg = NULL;
     }
     app_unlock();
+    kv_erase("netp");
     if (p) {
-        kv_erase("netp");
         ESP_LOGI(TAG, "pending net change cancelled");
     }
     return p;

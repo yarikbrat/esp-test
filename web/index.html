@@ -134,7 +134,7 @@ a{color:var(--acc)}
     </form>
     <div class="msg" id="netMsg" role="status" aria-live="polite"></div>
     <div class="msg warn" id="netPending" hidden>Зміна мережевих налаштувань (адреса <span id="netPendIp"></span>) очікує підтвердження.
-      Підтвердіть, якщо модуль Ethernet уже працює з новими налаштуваннями, або скасуйте.
+      <span id="netPendHint"></span>
       <div class="actions"><button id="netConfirm">Підтвердити</button><button id="netCancel">Скасувати</button></div></div>
     <div class="note">Адресу зберігає сам модуль Ethernet, ESP32 записує її у свою пам'ять, коли стенд відповів за новою адресою. Якщо доступ втрачено: знайдіть модуль програмою VirCom (Search) або командою <code>arp -a</code>, відкрийте його налаштування на порту 8000 і поверніть 192.168.144.36; потім утримуйте BOOT на ESP32 5 с, щоб і ESP32 повернулася до початкових налаштувань. Докладно — у README.</div>
   </section>
@@ -162,7 +162,9 @@ function api(method, path, body) {
         opt.headers["Content-Type"] = "application/x-www-form-urlencoded";
       }
       const r = await fetch(path, opt);
-      if (r.headers.get("X-Req-Id") !== rid) { // error replies carry the id too
+      const got = r.headers.get("X-Req-Id");
+      // Error replies carry the id too, except 431 (headers never parsed): an id-less error is ours.
+      if (got !== rid && !(got === null && r.status >= 400)) {
         crossTalkAt = Date.now();
         return { ok: false, status: r.status, data: null, crossTalk: true };
       }
@@ -271,6 +273,12 @@ function renderNet(n) {
   if (n.apply === "failed" && n.apply_msg) setMsg($("#netMsg"), n.apply_msg, "bad");
   $("#netPending").hidden = n.apply !== "pending" || netBusy;
   $("#netPendIp").textContent = n.pending_ip || "";
+  // A new IP can only be confirmed from a page opened at that IP; same IP (mask or gateway) from any page.
+  const canConfirm = n.pending_ip === n.ip || n.pending_ip === location.hostname;
+  $("#netConfirm").hidden = !canConfirm;
+  $("#netPendHint").textContent = canConfirm
+    ? "Підтвердіть, якщо модуль Ethernet уже працює з новими налаштуваннями, або скасуйте."
+    : "Щоб підтвердити, відкрийте http://" + n.pending_ip + "/ — або скасуйте зміну.";
 }
 
 function render(s) {
@@ -424,14 +432,20 @@ async function maybeCommitNet(n) {
   if (!res.ok && res.data && res.data.error === "no_pending") return; // another page committed first
   setMsg($("#netMsg"), msgOf(res, res.ok ? "Нові мережеві налаштування збережено" : "Не вдалося зберегти"), res.ok ? "ok" : "bad");
 }
-$("#netConfirm").addEventListener("click", async () => {
-  const res = await api("POST", "/api/net/commit");
-  setMsg($("#netMsg"), msgOf(res, res.ok ? "Нові мережеві налаштування збережено" : "Не вдалося зберегти"), res.ok ? "ok" : "bad");
-});
-$("#netCancel").addEventListener("click", async () => {
-  const res = await api("POST", "/api/net/cancel");
-  setMsg($("#netMsg"), msgOf(res, res.ok ? "Зміну скасовано" : "Не вдалося скасувати"), res.ok ? "ok" : "bad");
-});
+// Both buttons stay disabled until the reply, so a double click cannot overwrite the first result.
+async function pendingAction(path, okText, badText) {
+  const btns = [$("#netConfirm"), $("#netCancel")];
+  if (btns.some(b => b.disabled)) return;
+  btns.forEach(b => { b.disabled = true; });
+  try {
+    const res = await api("POST", path);
+    setMsg($("#netMsg"), msgOf(res, res.ok ? okText : badText), res.ok ? "ok" : "bad");
+  } finally {
+    btns.forEach(b => { b.disabled = false; });
+  }
+}
+$("#netConfirm").addEventListener("click", () => pendingAction("/api/net/commit", "Нові мережеві налаштування збережено", "Не вдалося зберегти"));
+$("#netCancel").addEventListener("click", () => pendingAction("/api/net/cancel", "Зміну скасовано", "Не вдалося скасувати"));
 
 async function applyNet(ip, mask, gw, m) {
   const res = await api("POST", "/api/net", { ip, mask, gw });
@@ -442,7 +456,7 @@ async function applyNet(ip, mask, gw, m) {
   setMsg(m, "Налаштовуємо модуль Ethernet…", "warn");
   await postNoCors(res.data.module_url + "ip_en.html", "lgk=&post=Login");
   await postNoCors(res.data.module_url + "ok.html", res.data.module_form);
-  if (last && ip === last.net.ip) { // mask or gateway only: the page stays where it is
+  if (res.data.same_ip) { // mask or gateway only: the page stays where it is
     await sleep(1000);
     const c = await api("POST", "/api/net/commit");
     setMsg(m, msgOf(c, c.ok ? "Нові мережеві налаштування збережено" : "Не вдалося зберегти"), c.ok ? "ok" : "bad");

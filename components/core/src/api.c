@@ -476,7 +476,8 @@ api_after_t api_handle(const api_backend_t *b, const http_request_t *req, const 
         }
     } else if (strcmp(path, "/api/net/cancel") == 0) {
         if (b->net_cancel && b->net_cancel(b->ctx)) {
-            send_ok(out, "Зміну мережевих налаштувань скасовано", scratch, cap);
+            send_ok(out, "Зміну скасовано в ESP32. Якщо модуль Ethernet уже отримав нові налаштування, поверніть "
+                         "їх у його конфігураторі (порт 8000)", scratch, cap);
         } else {
             send_fail(out, 409, "no_pending", "Немає змін мережі, що очікують застосування", scratch, cap);
         }
@@ -525,13 +526,10 @@ api_after_t api_handle(const api_backend_t *b, const http_request_t *req, const 
         } else {
             snprintf(url, sizeof(url), "http://%s:%u/", ip, (unsigned)b->http_port);
         }
-        if (host_is_ip) {
-            netcfg_format_ipv4(host_ip, mod_host, sizeof(mod_host)); // where the browser reached us
-        } else {
-            api_snapshot_t snap;
-            b->snapshot(b->ctx, &snap);
-            netcfg_format_ipv4(snap.net.ip, mod_host, sizeof(mod_host));
-        }
+        api_snapshot_t snap;
+        b->snapshot(b->ctx, &snap);
+        // Where the browser reached us, else the active address.
+        netcfg_format_ipv4(host_is_ip ? host_ip : snap.net.ip, mod_host, sizeof(mod_host));
         snprintf(mod_url, sizeof(mod_url), "http://%s:%u/", mod_host, (unsigned)UART_ETH_WEB_PORT);
         jw_t w;
         jw_init(&w, scratch, cap);
@@ -541,6 +539,8 @@ api_after_t api_handle(const api_backend_t *b, const http_request_t *req, const 
         jw_str(&w, url);
         jw_raw(&w, ",\"module_url\":");
         jw_str(&w, mod_url);
+        jw_raw(&w, ",\"same_ip\":");
+        jw_bool(&w, cfg.ip == snap.net.ip); // mask or gateway only: the page commits right away
         jw_raw(&w, ",\"module_form\":");
         jw_str(&w, form);
         jw_raw(&w, "}");

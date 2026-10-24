@@ -191,26 +191,36 @@ static int parse_request_line(http_request_t *r, char *h, size_t line_len)
 
 // Parses the collected head. Returns 0 or an HTTP error status; p->body_need is the body length
 // whenever it could be determined, even on error.
-// Line noise that happens to contain A-Z bytes ends up glued in front of a real request line. If the
-// first line holds a known method token after some prefix, drop the prefix so the request survives.
+static size_t find(const char *h, size_t n, size_t from, const char *tok)
+{
+    size_t tl = strlen(tok);
+    for (size_t i = from; i + tl <= n; i++) {
+        if (memcmp(h + i, tok, tl) == 0) {
+            return i;
+        }
+    }
+    return n;
+}
+
+// Line noise that happens to contain A-Z bytes (or a newline) ends up glued in front of a real request.
+// Find the earliest "GET /", "HEAD /" or "POST /" that starts a complete request line and drop what precedes it.
 static void strip_noise(http_parser_t *p)
 {
     static const char *const tokens[] = {"GET /", "HEAD /", "POST /"};
-    char *eol = memchr(p->head, '\n', p->head_len);
-    size_t line = eol ? (size_t)(eol - p->head) : p->head_len;
-    size_t best = 0;
+    size_t best = p->head_len;
     for (size_t t = 0; t < sizeof(tokens) / sizeof(tokens[0]); t++) {
-        size_t tl = strlen(tokens[t]);
-        for (size_t i = 1; i + tl <= line; i++) {
-            if (memcmp(p->head + i, tokens[t], tl) == 0) {
-                if (!best || i < best) {
-                    best = i;
-                }
+        for (size_t i = find(p->head, p->head_len, 1, tokens[t]); i < best;
+             i = find(p->head, p->head_len, i + 1, tokens[t])) {
+            size_t eol = find(p->head, p->head_len, i, "\n");
+            size_t end = (eol > i && p->head[eol - 1] == '\r') ? eol - 1 : eol;
+            if (eol < p->head_len && end - i > 9 && memcmp(p->head + end - 9, " HTTP/1.", 8) == 0) {
+                best = i;
                 break;
             }
         }
     }
-    if (best) {
+    if (best > 0 && best < p->head_len && memcmp(p->head, "GET /", 5) && memcmp(p->head, "HEAD /", 6) &&
+        memcmp(p->head, "POST /", 6)) {
         memmove(p->head, p->head + best, p->head_len - best);
         p->head_len -= best;
         p->stats.skipped_bytes += (uint32_t)best;
@@ -294,7 +304,8 @@ size_t http_parser_feed(http_parser_t *p, const uint8_t *data, size_t len, uint3
                 p->tail = ((uint32_t)(uint8_t)p->head[p->head_len - 3] << 16) |
                           ((uint32_t)(uint8_t)p->head[p->head_len - 2] << 8) |
                           (uint8_t)p->head[p->head_len - 1];
-                p->error_head = memcmp(p->head, "HEAD ", 5) == 0;
+                // A noisy prefix may hide the method: any HEAD request line in the buffer means no body.
+                p->error_head = find(p->head, p->head_len, 0, "HEAD /") < p->head_len;
                 p->req.rid[0] = '\0'; // headers were never parsed: do not echo the previous request's id
                 note_drop(p);
                 fail(p, 431, ev);
@@ -380,8 +391,8 @@ bool http_parser_tick(http_parser_t *p, uint32_t now_ms)
     }
     if (now_ms - p->last_ms > HTTP_IDLE_TIMEOUT_MS || now_ms - p->start_ms > HTTP_TOTAL_TIMEOUT_MS) {
         p->stats.timeouts++;
-        if (p->state == ST_HEAD) {
-            note_drop(p);
+        if (p->state == ST_HEAD || p->state == ST_BODY) {
+            note_drop(p); // the head is still in the buffer
         } else {
             p->drop_len = 0; // timed out while skipping: the rejected request was already reported
         }
