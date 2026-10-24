@@ -43,6 +43,7 @@ typedef struct {
 
     QueueHandle_t persist_q; // channel numbers whose zero must be written to NVS
     TaskHandle_t logger_task;
+    TaskHandle_t tasks[5]; // for the periodic stack report
 } app_t;
 
 extern app_t g_app;

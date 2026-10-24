@@ -56,9 +56,10 @@ void app_main(void)
     open_log();
     ESP_LOGI(TAG, "session %u", g_app.session);
 
-    xTaskCreate(task_storage, "storage", 3072, NULL, PRIO_STORAGE, NULL);
-    xTaskCreate(task_logger, "logger", 4096, NULL, PRIO_LOGGER, &g_app.logger_task);
-    xTaskCreate(task_sensors, "sensors", 4096, NULL, PRIO_SENSORS, NULL);
-    xTaskCreate(task_bridge, "bridge", 6144, NULL, PRIO_BRIDGE, NULL);
-    xTaskCreate(task_button, "button", 2560, NULL, PRIO_BUTTON, NULL);
+    xTaskCreate(task_storage, "storage", 3072, NULL, PRIO_STORAGE, &g_app.tasks[0]);
+    xTaskCreate(task_logger, "logger", 4096, NULL, PRIO_LOGGER, &g_app.tasks[1]);
+    g_app.logger_task = g_app.tasks[1];
+    xTaskCreate(task_sensors, "sensors", 4096, NULL, PRIO_SENSORS, &g_app.tasks[2]);
+    xTaskCreate(task_bridge, "bridge", 6144, NULL, PRIO_BRIDGE, &g_app.tasks[3]);
+    xTaskCreate(task_button, "button", 3072, NULL, PRIO_BUTTON, &g_app.tasks[4]);
 }
