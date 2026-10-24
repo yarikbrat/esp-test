@@ -63,6 +63,20 @@ static bool contains_token_ci(const char *s, size_t len, const char *tok)
 
 // Header pass. Sets p->body_need as soon as Content-Length is seen, so a body can still be
 // skipped when a later header line or the request line turns out to be invalid.
+// Short alphanumeric ids only: X-Req-Id is echoed into a response header, so nothing else may pass.
+static void copy_token(char *dst, const char *val, size_t vlen)
+{
+    bool clean = vlen > 0 && vlen <= HTTP_MAX_RID;
+    for (size_t i = 0; clean && i < vlen; i++) {
+        char c = val[i];
+        clean = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+    }
+    if (clean) {
+        memcpy(dst, val, vlen);
+        dst[vlen] = '\0';
+    }
+}
+
 static int parse_headers(http_parser_t *p, char *line, char *end)
 {
     bool have_len = false;
@@ -115,15 +129,9 @@ static int parse_headers(http_parser_t *p, char *line, char *end)
         } else if (name_is(line, nlen, "Accept-Encoding")) {
             p->req.accept_gzip = contains_token_ci(val, vlen, "gzip");
         } else if (name_is(line, nlen, "X-Req-Id")) {
-            bool clean = vlen > 0 && vlen <= HTTP_MAX_RID;
-            for (size_t i = 0; clean && i < vlen; i++) {
-                char c = val[i];
-                clean = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
-            }
-            if (clean) { // echoed into a response header, so nothing else may pass
-                memcpy(p->req.rid, val, vlen);
-                p->req.rid[vlen] = '\0';
-            }
+            copy_token(p->req.rid, val, vlen);
+        } else if (name_is(line, nlen, "X-Client-Id")) {
+            copy_token(p->req.client, val, vlen);
         } else if (name_is(line, nlen, "Host")) {
             char *colon2 = memchr(val, ':', vlen); // drop ":port"
             size_t hlen = colon2 ? (size_t)(colon2 - val) : vlen;

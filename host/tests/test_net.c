@@ -139,6 +139,8 @@ void test_http(void)
     CHECK(fh.requests == 1 && fh.last.rid[0] == '\0');
     fh = feed_str(&p, "GET / HTTP/1.1\r\n\r\n", 4096, 0);
     CHECK(fh.requests == 1 && fh.last.rid[0] == '\0');
+    fh = feed_str(&p, "GET / HTTP/1.1\r\nX-Client-Id: k9Q\r\n\r\n", 4096, 0);
+    CHECK(fh.requests == 1 && strcmp(fh.last.client, "k9Q") == 0 && fh.last.rid[0] == '\0');
 
     // Two pipelined requests in one chunk, then a POST whose body is split.
     http_parser_init(&p);

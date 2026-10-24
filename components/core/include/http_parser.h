@@ -33,6 +33,7 @@ typedef struct {
     bool accept_gzip;
     char host[HTTP_MAX_HOST + 1]; // Host header without the port; "" if absent or too long
     char rid[HTTP_MAX_RID + 1];   // X-Req-Id header, letters and digits only; "" otherwise
+    char client[HTTP_MAX_RID + 1]; // X-Client-Id header, same rules: one id per open page
     size_t body_len;
     char body[HTTP_MAX_BODY + 1]; // always NUL-terminated
 } http_request_t;

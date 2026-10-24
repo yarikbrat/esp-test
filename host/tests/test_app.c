@@ -179,6 +179,7 @@ typedef struct {
     netcfg_t pending_cfg;
     char host[HTTP_MAX_HOST + 1]; // Host header of the next call
     char rid[HTTP_MAX_RID + 1];   // X-Req-Id of the next call
+    char client[HTTP_MAX_RID + 1]; // X-Client-Id of the next call
     char out[16384];
     size_t out_len;
 } fake_t;
@@ -262,6 +263,7 @@ static api_after_t call(fake_t *f, http_method_t m, const char *path, const char
     req.accept_gzip = gzip;
     strcpy(req.host, f->host);
     strcpy(req.rid, f->rid);
+    strcpy(req.client, f->client);
     f->out_len = 0;
     f->out[0] = '\0';
     char scratch[6144];
@@ -366,6 +368,29 @@ void test_api(void)
     f->rid[0] = '\0';
     call(f, HTTP_GET, "/api/state", NULL, NULL, false);
     CHECK(!has(f, "X-Req-Id"));
+
+    // Open pages are counted by X-Client-Id within a 3 s window; requests without an id are not counted.
+    f->snap.now_ms = 100000;
+    strcpy(f->client, "pageA");
+    call(f, HTTP_GET, "/api/state", NULL, NULL, false);
+    CHECK(has(f, "\"clients\":1,"));
+    strcpy(f->client, "pageB");
+    f->snap.now_ms = 101000;
+    call(f, HTTP_GET, "/api/state", NULL, NULL, false);
+    CHECK(has(f, "\"clients\":2,"));
+    f->snap.now_ms = 103500; // pageA silent for 3.5 s, pageB polls
+    call(f, HTTP_GET, "/api/state", NULL, NULL, false);
+    CHECK(has(f, "\"clients\":1,"));
+    const char *many[] = {"p1", "p2", "p3", "p4", "p5"};
+    for (int i = 0; i < 5; i++) {
+        strcpy(f->client, many[i]);
+        call(f, HTTP_GET, "/api/state", NULL, NULL, false);
+    }
+    CHECK(has(f, "\"clients\":4,")); // table is full, still more than one
+    f->client[0] = '\0';
+    f->snap.now_ms = 200000;
+    call(f, HTTP_GET, "/api/state", NULL, NULL, false);
+    CHECK(has(f, "\"clients\":0,"));
 
     // Network: invalid input never prepares a change.
     strcpy(f->host, "192.168.144.36");

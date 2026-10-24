@@ -180,12 +180,44 @@ static void json_chan_common(jw_t *w, const chan_t *c, uint32_t stale_ms, uint32
     jw_printf(w, ",\"errors\":%u", (unsigned)c->errors);
 }
 
-static void render_state(jw_t *w, const api_snapshot_t *s)
+// Open pages that polled recently, by X-Client-Id. Two or more means replies get mixed (see send()).
+#define API_CLIENTS_MAX    4
+#define API_CLIENT_TTL_MS  3000
+static struct {
+    char id[HTTP_MAX_RID + 1];
+    uint32_t seen_ms;
+} s_clients[API_CLIENTS_MAX];
+
+static unsigned note_client(const char *id, uint32_t now)
+{
+    if (id[0]) {
+        int slot = 0;
+        for (int i = 0; i < API_CLIENTS_MAX; i++) {
+            if (strcmp(s_clients[i].id, id) == 0) {
+                slot = i;
+                break;
+            }
+            if (now - s_clients[i].seen_ms > now - s_clients[slot].seen_ms || !s_clients[i].id[0]) {
+                slot = i; // otherwise reuse the stalest entry
+            }
+        }
+        strcpy(s_clients[slot].id, id);
+        s_clients[slot].seen_ms = now;
+    }
+    unsigned n = 0;
+    for (int i = 0; i < API_CLIENTS_MAX; i++) {
+        n += s_clients[i].id[0] && now - s_clients[i].seen_ms <= API_CLIENT_TTL_MS;
+    }
+    return n;
+}
+
+static void render_state(jw_t *w, const api_snapshot_t *s, unsigned clients)
 {
     uint32_t now = s->now_ms;
     jw_raw(w, "{\"platform\":");
     jw_str(w, s->platform);
-    jw_printf(w, ",\"up_s\":%u,\"session\":%u", (unsigned)s->uptime_s, (unsigned)s->session);
+    jw_printf(w, ",\"up_s\":%u,\"session\":%u,\"clients\":%u", (unsigned)s->uptime_s, (unsigned)s->session,
+              clients);
 
     jw_raw(w, ",\"sonar\":{");
     json_chan_common(w, &s->st.sonar, STAND_SONAR_STALE_MS, now, 1.0, 1, "cm");
@@ -358,7 +390,7 @@ api_after_t api_handle(const api_backend_t *b, const http_request_t *req, const 
         b->snapshot(b->ctx, &snap);
         jw_t w;
         jw_init(&w, scratch, cap);
-        render_state(&w, &snap);
+        render_state(&w, &snap, note_client(req->client, snap.now_ms));
         send_json(out, 200, &w, head_only);
         return after;
     }
