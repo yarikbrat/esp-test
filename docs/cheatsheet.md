@@ -1,5 +1,8 @@
 # Шпаргалка команд
 
+Краткая выжимка. Подробные инструкции, откуда взяты команды: `docs/network-access.md` (сеть),
+`docs/hardware-log.md` (USB и WSL), `README.md` (сборка). Меняя команду, поправить и источник.
+
 Все команды Windows — в обычной командной строке (Пуск → `cmd`), если не сказано «от администратора».
 Команды Linux — в WSL, в каталоге проекта `~/projects/esp`.
 
@@ -10,10 +13,10 @@
 | Адреса всех подключений | `ipconfig` |
 | Только адреса разъёма Ethernet (PowerShell) | `Get-NetIPAddress -InterfaceAlias Ethernet -AddressFamily IPv4` |
 | Имена подключений | `netsh interface ipv4 show interfaces` |
-| Задать один адрес (от администратора) | `netsh interface ipv4 set address name="Ethernet" source=static address=192.168.144.10 mask=255.255.255.0` |
+| Задать единственный адрес (от администратора). **Удаляет все прочие адреса разъёма**, на ПК разработчика вместо этого `add` | `netsh interface ipv4 set address name="Ethernet" source=static address=192.168.144.10 mask=255.255.255.0` |
 | Добавить второй адрес к уже заданному (от администратора) | `netsh interface ipv4 add address name="Ethernet" address=192.168.1.10 mask=255.255.255.0` |
 | Удалить адрес (от администратора) | `netsh interface ipv4 delete address name="Ethernet" address=192.168.1.10` |
-| Вернуть автоматические настройки (от администратора) | `netsh interface ipv4 set address name="Ethernet" source=dhcp` |
+| Вернуть автоматические настройки (от администратора), ручные адреса при этом удаляются | `netsh interface ipv4 set address name="Ethernet" source=dhcp` |
 
 На ПК разработчика у разъёма `Ethernet` два адреса: **192.168.144.10** (рабочая сеть стенда) и **192.168.1.10**
 (сеть модуля с заводскими настройками 192.168.1.254, нужна только при сбросе модуля). В «Параметрах» Windows виден
@@ -27,7 +30,7 @@
 | Страница стенда | браузер: `http://192.168.144.36/` |
 | Настройки модуля Ethernet | браузер: `http://192.168.144.36:8000/`, пароль пустой |
 | Состояние стенда (JSON) | `curl http://192.168.144.36/api/state` |
-| Найти модуль в сети 192.168.144.x | `for /L %i in (1,1,254) do @start /b ping -n 1 -w 300 192.168.144.%i >nul` затем `arp -a` (MAC модуля `28-80-e4-…`) |
+| Найти модуль в сети 192.168.144.x (только `cmd`, не PowerShell) | `for /L %i in (1,1,254) do @start /b ping -n 1 -w 300 192.168.144.%i >nul`, подождать 5 с, затем отдельно `arp -a` (MAC модуля `28-80-e4-…`) |
 | Найти модуль программой | `C:\Users\user\Downloads\VirCom\VirCom_en.exe` → поиск устройств |
 
 Команды API (для проверок, `curl` есть в Windows 10/11):
@@ -46,10 +49,16 @@
 
 | Что | Команда |
 |---|---|
-| Список USB-устройств | `usbipd list` (плата: `USB-SERIAL CH340`, BUSID `4-9`) |
+Значения для ПК разработчика: BUSID `4-9`, дистрибутив WSL `DDEV`, пользователь `yarikbrat`. На другом компьютере
+BUSID взять из `usbipd list`, имя дистрибутива — из `wsl -l -v` (на ноутбуке BUSID был `3-1`).
+
+| Что | Команда |
+|---|---|
+| Список USB-устройств | `usbipd list` (плата: `USB-SERIAL CH340`) |
 | Разрешить проброс (один раз, от администратора) | `usbipd bind --busid 4-9` |
 | Пробросить в WSL (после каждого переподключения кабеля) | `usbipd attach --wsl --busid 4-9` |
-| Права на порт в WSL (до перезахода в WSL) | `wsl -d DDEV -u root -- chmod a+rw /dev/ttyUSB0` |
+| Права на порт навсегда (один раз, затем выйти из WSL: `wsl --shutdown`) | `wsl -d DDEV -u root -- usermod -aG dialout yarikbrat` |
+| Права на порт сразу, без перезахода (нужно после **каждого** `attach`) | `wsl -d DDEV -u root -- chmod a+rw /dev/ttyUSB0` |
 
 После `attach` плата исчезает из Windows как COM7 и появляется в WSL как `/dev/ttyUSB0`.
 
@@ -59,13 +68,15 @@
 |---|---|
 | Окружение ESP-IDF (в каждом новом терминале) | `. ~/esp/esp-idf/export.sh` |
 | Собрать | `idf.py build` |
-| Прошить | `idf.py -p /dev/ttyUSB0 -b 460800 flash` |
+| Прошить основную прошивку (из корня проекта; **сначала сверить `docs/connections.md`**) | `cd ~/projects/esp && idf.py -p /dev/ttyUSB0 -b 460800 flash` |
 | Лог платы (выход: `Ctrl+]`) | `idf.py -p /dev/ttyUSB0 monitor` |
-| Тестовая прошивка первого запуска | `cd tools/bringup && idf.py build && idf.py -p /dev/ttyUSB0 flash` |
+| Тестовая прошивка первого запуска (**сначала сверить `docs/connections.md`**: другие режимы выводов) | `(cd ~/projects/esp/tools/bringup && idf.py build && idf.py -p /dev/ttyUSB0 flash)` |
 | Тесты ядра на ПК | `make -C host test` |
 | Эмулятор стенда | `make -C host emu && ./host/build/emu --port 8080` → `http://127.0.0.1:8080/` |
 
 **Перед каждой прошивкой** сверить `docs/connections.md`: какие выводы прошивка делает выходами и что к ним подключено.
+Тестовая прошивка запускается в скобках, чтобы терминал остался в корне проекта: иначе следующая команда
+«Прошить» снова зальёт тестовую прошивку.
 
 ## Из WSL к стенду
 

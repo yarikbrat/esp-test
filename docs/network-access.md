@@ -24,7 +24,9 @@ IP-адрес `192.168.144.10`, длина префикса (или маска) 
 
 ### Windows из командной строки (от администратора)
 
-Посмотреть имя подключения: `netsh interface ipv4 show interfaces` (обычно `Ethernet`).
+Посмотреть имя подключения: `netsh interface ipv4 show interfaces` (обычно `Ethernet`). Команда ниже
+**заменяет все адреса разъёма** одним; чтобы добавить адрес к уже существующим, вместо `set` —
+`netsh interface ipv4 add address name="Ethernet" address=192.168.144.10 mask=255.255.255.0`.
 
 ```
 netsh interface ipv4 set address name="Ethernet" source=static address=192.168.144.10 mask=255.255.255.0
