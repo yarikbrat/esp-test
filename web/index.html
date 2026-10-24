@@ -96,6 +96,7 @@ a{color:var(--acc)}
         <input id="logIv" type="number" min="1" max="3600" step="1" value="10" inputmode="numeric"></div>
       <div><button class="primary" id="logSave">Зберегти налаштування</button></div>
     </div>
+    <div class="msg warn" id="logDirty" hidden>Зміни ще не збережено: стенд працює з поточними налаштуваннями, доки ви не натиснете «Зберегти налаштування».</div>
     <div class="msg" id="logMsg" role="status" aria-live="polite"></div>
     <div class="row"><span>Поточні налаштування</span><span id="logCur">—</span></div>
     <div class="row"><span>Заповнення сховища</span><span id="logFill">—</span></div>
@@ -257,6 +258,12 @@ function renderLog(l) {
   e.textContent = l.write_errors ? l.write_errors + " (код " + l.last_error + ")" : "немає";
   e.className = l.write_errors ? "bad" : "ok";
   if (!logFormTouched) { $("#logEn").checked = l.enabled; $("#logIv").value = l.interval_s; }
+  renderLogDirty();
+}
+function renderLogDirty() {
+  const l = last && last.log;
+  $("#logDirty").hidden = !logFormTouched || !l ||
+    ($("#logEn").checked === l.enabled && $("#logIv").value.trim() === String(l.interval_s));
 }
 
 function renderNet(n) {
@@ -331,7 +338,7 @@ document.querySelectorAll(".baro").forEach(box => {
 });
 
 let logFormTouched = false;
-["#logEn", "#logIv"].forEach(s => $(s).addEventListener("input", () => { logFormTouched = true; }));
+["#logEn", "#logIv"].forEach(s => $(s).addEventListener("input", () => { logFormTouched = true; renderLogDirty(); }));
 $("#logSave").addEventListener("click", async () => {
   const iv = $("#logIv").value.trim(), m = $("#logMsg");
   if (!/^\d+$/.test(iv) || +iv < 1 || +iv > 3600) { setMsg(m, "Інтервал має бути цілим числом від 1 до 3600 с", "bad"); return; }
