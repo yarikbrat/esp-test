@@ -1,6 +1,6 @@
 #pragma once
 // Shared state of the firmware tasks and the web API backend.
-// g_app.lock guards app_t except the histlog, which has log_lock (an erase takes seconds).
+// g_app.lock guards app_t except the histlog, which has log_lock (a sector erase takes tens of ms).
 // Lock order: log_lock, then lock. Never wait for log_lock while holding lock.
 #include <stdbool.h>
 #include <stdint.h>
