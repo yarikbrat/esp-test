@@ -188,6 +188,21 @@ void test_histlog(void)
     n = histlog_read_recent(&hl, HL_SEQ_EMPTY, out, 10, NULL);
     CHECK(n == 1 && out[0].seq == mark_seq + 1);
 
+    // Damaged slots from before a clear are not reported after a reboot.
+    {
+        uint32_t old_slot = (mark_seq - 2) % hl.capacity; // written before the clear
+        uint8_t *p = fe.mem + old_slot * 32u;
+        CHECK(p[0] != 0xFF); // the slot really holds an old record
+        p[5] ^= 0x01;        // break its CRC
+        CHECK_EQ_INT(histlog_open(&hl, &ops, 4), 0);
+        CHECK_EQ_INT(hl.corrupt, 0);
+        append_n(&hl, 3); // damage inside the live log is still reported
+        uint8_t *q = fe.mem + ((hl.next_seq - 2) % hl.capacity) * 32u;
+        q[5] ^= 0x01;
+        CHECK_EQ_INT(histlog_open(&hl, &ops, 4), 0);
+        CHECK_EQ_INT(hl.corrupt, 1);
+    }
+
     // Two clears in a row, then a full lap over the markers.
     CHECK_EQ_INT(histlog_clear(&hl), 0);
     CHECK_EQ_INT(histlog_clear(&hl), 0);

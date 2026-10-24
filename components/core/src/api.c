@@ -308,7 +308,7 @@ static void render_state(jw_t *w, const api_snapshot_t *s, unsigned clients)
               (unsigned)s->http.skipped_bytes);
 }
 
-static void render_log(jw_t *w, const hl_record_t *r, size_t n, uint32_t next_before)
+static void render_log(jw_t *w, const hl_record_t *r, size_t n, uint32_t next_before, uint32_t oldest)
 {
     jw_raw(w, "{\"ok\":true,\"records\":[");
     for (size_t i = 0; i < n; i++) {
@@ -332,7 +332,7 @@ static void render_log(jw_t *w, const hl_record_t *r, size_t n, uint32_t next_be
         }
         jw_raw(w, "]}");
     }
-    jw_raw(w, "],\"next_before\":");
+    jw_printf(w, "],\"oldest\":%u,\"next_before\":", (unsigned)oldest);
     if (next_before != HL_SEQ_EMPTY) {
         jw_printf(w, "%u", (unsigned)next_before);
     } else {
@@ -398,10 +398,15 @@ api_after_t api_handle(const api_backend_t *b, const http_request_t *req, const 
         form_get_long(req->query, "limit", 1, API_LOG_PAGE_MAX, &limit);
         hl_record_t recs[API_LOG_PAGE_MAX];
         uint32_t next = HL_SEQ_EMPTY;
-        size_t n = b->log_read(b->ctx, (uint32_t)before, recs, (size_t)limit, &next);
+        uint32_t oldest = 0;
+        int n = b->log_read(b->ctx, (uint32_t)before, recs, (size_t)limit, &next, &oldest);
+        if (n < 0) {
+            send_fail(out, 409, "busy", "Журнал зайнятий, спробуйте ще раз", scratch, cap);
+            return after;
+        }
         jw_t w;
         jw_init(&w, scratch, cap);
-        render_log(&w, recs, n, next);
+        render_log(&w, recs, (size_t)n, next, oldest);
         send_json(out, 200, &w, head_only);
         return after;
     }

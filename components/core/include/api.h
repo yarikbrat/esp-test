@@ -62,7 +62,9 @@ typedef struct {
     bool (*zero_reset)(void *ctx, int ch);                 // false: calibration in progress
     persist_t (*log_config)(void *ctx, const log_cfg_t *cfg); // returns persist result
     bool (*log_clear)(void *ctx);                          // false: already clearing
-    size_t (*log_read)(void *ctx, uint32_t before, hl_record_t *out, size_t max, uint32_t *next_before);
+    // Records before `before`, newest first; *oldest is the oldest live seq. -1: log busy, try again.
+    int (*log_read)(void *ctx, uint32_t before, hl_record_t *out, size_t max, uint32_t *next_before,
+                    uint32_t *oldest);
     // Validated settings waiting for the module to move; committed by POST /api/net/commit at the new IP.
     void (*net_prepare)(void *ctx, const netcfg_t *cfg);
     bool (*net_pending)(void *ctx, netcfg_t *out);

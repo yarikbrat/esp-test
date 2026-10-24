@@ -73,6 +73,20 @@ int histlog_open(histlog_t *hl, const hl_flash_t *fl, uint32_t n_sectors)
     if (cleared && hl->oldest_seq <= clear_seq) {
         hl->oldest_seq = clear_seq + 1;
     }
+    if (cleared && hl->corrupt) {
+        // Damaged slots left from before a clear are not part of the log any more: count only live ones.
+        uint32_t count = histlog_count(hl), first = hl->oldest_seq % hl->capacity;
+        hl->corrupt = 0;
+        for (uint32_t slot = 0; slot < hl->capacity; slot++) {
+            hl_record_t r;
+            if ((slot + hl->capacity - first) % hl->capacity >= count) {
+                continue;
+            }
+            if (read_slot(hl, slot, &r) == 0 && !rec_blank(&r) && !rec_valid_at(hl, &r, slot)) {
+                hl->corrupt++;
+            }
+        }
+    }
     return 0;
 }
 
@@ -159,6 +173,8 @@ int histlog_format(histlog_t *hl)
     return 0;
 }
 
+// If the marker lands on a sector start, that sector (the oldest records) is erased before the marker is
+// written; a failed write then reports an error although those records are already gone.
 int histlog_clear(histlog_t *hl)
 {
     hl_record_t mark;

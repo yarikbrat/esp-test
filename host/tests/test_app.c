@@ -175,7 +175,7 @@ typedef struct {
     int zero_calls, reset_calls, cfg_calls, clear_calls;
     log_cfg_t last_cfg;
     int prepare_calls;
-    bool pending;
+    bool pending, log_busy;
     netcfg_t pending_cfg;
     char host[HTTP_MAX_HOST + 1]; // Host header of the next call
     char rid[HTTP_MAX_RID + 1];   // X-Req-Id of the next call
@@ -217,9 +217,13 @@ static bool f_pending(void *ctx, netcfg_t *out)
     }
     return f->pending;
 }
-static size_t f_read(void *ctx, uint32_t before, hl_record_t *out, size_t max, uint32_t *next_before)
+static int f_read(void *ctx, uint32_t before, hl_record_t *out, size_t max, uint32_t *next_before,
+                  uint32_t *oldest)
 {
-    (void)ctx;
+    if (((fake_t *)ctx)->log_busy) {
+        return -1;
+    }
+    *oldest = 0;
     uint32_t start = before == HL_SEQ_EMPTY ? 3 : before;
     *next_before = start > max ? start - (uint32_t)max : HL_SEQ_EMPTY;
     size_t n = 0;
@@ -233,7 +237,7 @@ static size_t f_read(void *ctx, uint32_t before, hl_record_t *out, size_t max, u
         out[n].flags[0] = HL_F_MAKE(true, false, SS_OK);
         out[n].flags[1] = HL_F_MAKE(false, false, SS_NOT_FOUND);
     }
-    return n;
+    return (int)n;
 }
 static int f_write(void *ctx, const void *d, size_t n)
 {
@@ -364,7 +368,11 @@ void test_api(void)
     CHECK(has(f, "\"seq\":2") && has(f, "\"seq\":1") && !has(f, "\"seq\":0"));
     CHECK(has(f, "\"next_before\":1") && has(f, "\"alt_m\":null"));
     call(f, HTTP_GET, "/api/log", "before=1&limit=20", NULL, false);
-    CHECK(has(f, "\"seq\":0") && has(f, "\"next_before\":null"));
+    CHECK(has(f, "\"seq\":0") && has(f, "\"next_before\":null") && has(f, "\"oldest\":0"));
+    f->log_busy = true; // a busy log is an error, never an empty page
+    call(f, HTTP_GET, "/api/log", NULL, NULL, false);
+    CHECK(has(f, "409") && has(f, "\"busy\"") && !has(f, "\"records\""));
+    f->log_busy = false;
 
     // Request id is echoed so the page can spot replies meant for another tab; never left over.
     strcpy(f->rid, "17");

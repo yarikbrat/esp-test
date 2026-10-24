@@ -265,8 +265,9 @@ function renderLog(l) {
 }
 function renderLogDirty() {
   const l = last && last.log;
+  const iv = $("#logIv").value.trim();
   $("#logDirty").hidden = !logFormTouched || !l ||
-    ($("#logEn").checked === l.enabled && $("#logIv").value.trim() === String(l.interval_s));
+    ($("#logEn").checked === l.enabled && /^\d+$/.test(iv) && Number(iv) === l.interval_s);
 }
 
 function renderNet(n) {
@@ -327,7 +328,7 @@ let netBusy = false; // polling pauses while the page moves the module to a new 
 async function poll() {
   const started = Date.now();
   const res = netBusy ? { ok: false } : await api("GET", "/api/state");
-  if (res.ok) { last = res.data; lastOkAt = Date.now(); render(last); await maybeCommitNet(last.net); await logLiveTick(); }
+  if (res.ok) { last = res.data; lastOkAt = Date.now(); render(last); await maybeCommitNet(last.net); logLiveTick(); }
   renderLink();
   setTimeout(poll, Math.max(100, 1000 - (Date.now() - started)));
 }
@@ -366,6 +367,7 @@ let logLoading = false;
 async function loadLog(append) {
   if (logLoading) return; // a second click would reuse the same page cursor
   logLoading = true;
+  logGen++; // a live update still in flight must not touch the new table
   $("#logLoad").disabled = $("#logOlder").disabled = true;
   try { await loadLogPage(append); }
   finally { logLoading = false; $("#logLoad").disabled = false; $("#logOlder").disabled = olderBefore === null; }
@@ -418,22 +420,24 @@ function renderLogMode() {
 
 // While the newest page is shown, new records are prepended as the logger writes them.
 const LOG_LIVE_ROWS = 100;
-let logLive = false, logTop = -1, logLiveAt = 0;
+let logLive = false, logTop = -1, logLiveAt = 0, logGen = 0, logTicking = false;
 async function logLiveTick() {
   const l = last && last.log;
-  if (!logLive || logLoading || !l || !l.enabled || l.clearing) return;
+  if (!logLive || logLoading || logTicking || !l || !l.enabled || l.clearing) return;
   if (Date.now() - logLiveAt < Math.max(2000, l.interval_s * 1000)) return;
   logLiveAt = Date.now();
-  logLoading = true;
+  logTicking = true;
+  const gen = logGen;
   try {
     const res = await api("GET", "/api/log?limit=5");
-    if (!res.ok || !logLive) return;
+    if (!res.ok || !logLive || gen !== logGen) return; // busy, or a click or a clear replaced the table
     const recs = res.data.records;
-    if (recs.length ? recs[0].seq < logTop : logTop >= 0) { logLoading = false; await loadLog(false); return; } // cleared elsewhere
+    // Cleared from another page: every row on screen is older than the oldest live record.
+    if (logTop >= 0 && res.data.oldest > logTop) { loadLog(false); return; }
     const fresh = recs.filter(r => r.seq > logTop);
     if (!fresh.length) return;
+    if (fresh.length === recs.length && logTop >= 0) { loadLog(false); return; } // missed some
     const tb = $("#logTable tbody");
-    if (fresh.length === recs.length && logTop >= 0) { logLoading = false; await loadLog(false); return; } // missed some
     for (let i = fresh.length - 1; i >= 0; i--) tb.insertBefore(logRow(fresh[i]), tb.firstChild);
     logTop = fresh[0].seq;
     if (tb.children.length > LOG_LIVE_ROWS) {
@@ -446,7 +450,7 @@ async function logLiveTick() {
     const m = $("#logMsg");
     if (m.classList.contains("mute")) setMsg(m, "", "");
   } finally {
-    logLoading = false;
+    logTicking = false;
   }
 }
 $("#logLoad").addEventListener("click", () => loadLog(false));
@@ -457,7 +461,7 @@ $("#logClear").addEventListener("click", async () => {
   setMsg($("#logMsg"), msgOf(res, res.ok ? "Історію очищено" : "Не вдалося очистити"), res.ok ? "ok" : "bad");
   if (res.ok) {
     $("#logTable tbody").textContent = ""; $("#logTable").hidden = true; olderBefore = null; $("#logOlder").disabled = true;
-    logLive = true; logTop = -1; logLiveAt = Date.now();
+    logLive = true; logTop = -1; logLiveAt = Date.now(); logGen++;
     renderLogMode();
   }
 });

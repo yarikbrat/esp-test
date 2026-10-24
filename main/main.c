@@ -39,7 +39,11 @@ static void open_log(void)
     if (g_app.log.capacity && histlog_count(&g_app.log) == 0 && g_app.log.corrupt == g_app.log.capacity) {
         ESP_LOGW(TAG, "history partition holds no log data, formatting it");
         if (histlog_format(&g_app.log) != 0) {
-            ESP_LOGE(TAG, "format failed (%d)", g_app.log.last_error);
+            int err = g_app.log.last_error;
+            ESP_LOGE(TAG, "format failed (%d), rescanning", err);
+            histlog_open(&g_app.log, &g_app.flash_ops, sectors); // the true state of a partly erased partition
+            g_app.log.write_errors++;
+            g_app.log.last_error = err;
         }
     }
     app_refresh_log_stats();

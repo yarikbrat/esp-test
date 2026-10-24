@@ -193,7 +193,8 @@ static bool be_log_clear(void *ctx)
     return ok;
 }
 
-static size_t be_log_read(void *ctx, uint32_t before, hl_record_t *out, size_t max, uint32_t *next_before)
+static int be_log_read(void *ctx, uint32_t before, hl_record_t *out, size_t max, uint32_t *next_before,
+                       uint32_t *oldest)
 {
     (void)ctx;
     *next_before = HL_SEQ_EMPTY;
@@ -202,11 +203,12 @@ static size_t be_log_read(void *ctx, uint32_t before, hl_record_t *out, size_t m
     app_unlock();
     // A sector erase holds log_lock for tens of ms; do not stall the bridge longer than that.
     if (busy || xSemaphoreTake(g_app.log_lock, pdMS_TO_TICKS(200)) != pdTRUE) {
-        return 0;
+        return -1;
     }
     size_t n = histlog_read_recent(&g_app.log, before, out, max, next_before);
+    *oldest = g_app.log.oldest_seq;
     xSemaphoreGive(g_app.log_lock);
-    return n;
+    return (int)n;
 }
 
 static void be_net_prepare(void *ctx, const netcfg_t *cfg)

@@ -336,12 +336,14 @@ static bool be_log_clear(void *ctx)
     return ok;
 }
 
-static size_t be_log_read(void *ctx, uint32_t before, hl_record_t *out, size_t max, uint32_t *next_before)
+static int be_log_read(void *ctx, uint32_t before, hl_record_t *out, size_t max, uint32_t *next_before,
+                       uint32_t *oldest)
 {
     (void)ctx;
     pthread_mutex_lock(&g_lock);
     *next_before = HL_SEQ_EMPTY;
-    size_t n = g_log_clearing ? 0 : histlog_read_recent(&g_log, before, out, max, next_before);
+    int n = g_log_clearing ? -1 : (int)histlog_read_recent(&g_log, before, out, max, next_before);
+    *oldest = g_log.oldest_seq;
     pthread_mutex_unlock(&g_lock);
     return n;
 }
