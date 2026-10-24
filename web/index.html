@@ -136,6 +136,7 @@ a{color:var(--acc)}
       <div><button class="primary" type="submit">Зберегти та застосувати</button></div>
     </form>
     <div class="msg" id="netMsg" role="status" aria-live="polite"></div>
+    <div class="msg warn" id="netMismatch" hidden></div>
     <div class="msg warn" id="netPending" hidden>Зміна мережевих налаштувань (адреса <span id="netPendIp"></span>) очікує підтвердження.
       <span id="netPendHint"></span>
       <div class="actions"><button id="netConfirm">Підтвердити</button><button id="netCancel">Скасувати</button></div></div>
@@ -281,6 +282,12 @@ function renderNet(n) {
   if (!netFormTouched) { $("#fIp").value = n.ip; $("#fMask").value = n.mask; $("#fGw").value = n.gw || ""; }
   if (n.apply === "failed" && n.apply_msg) setMsg($("#netMsg"), n.apply_msg, "bad");
   $("#netPending").hidden = n.apply !== "pending" || netBusy;
+  // After BOOT the ESP32 is back on the default address while the module still answers on the old one.
+  const host = location.hostname, mm = $("#netMismatch");
+  mm.hidden = n.apply === "pending" || netBusy || !IP_RE.test(host) || host.startsWith("127.") || host === n.ip;
+  mm.textContent = "ESP32 налаштована на адресу " + n.ip + ", а модуль Ethernet відповідає за адресою " + host +
+    ". Так буває після утримання BOOT: відкрийте http://" + host + ":8000/, поставте Device IP " + n.ip +
+    " і натисніть Submit, потім відкрийте http://" + n.ip + "/.";
   $("#netPendIp").textContent = n.pending_ip || "";
   // A new IP can only be confirmed from a page opened at that IP; same IP (mask or gateway) from any page.
   const canConfirm = n.pending_ip === n.ip || n.pending_ip === location.hostname;
