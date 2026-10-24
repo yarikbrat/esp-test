@@ -94,12 +94,20 @@ static esp_err_t bmp_write(i2c_master_dev_handle_t dev, uint8_t reg, uint8_t val
     return i2c_master_transmit(dev, b, sizeof(b), 50);
 }
 
-static esp_err_t baro_init(i2c_master_dev_handle_t dev)
+static esp_err_t baro_init(i2c_master_bus_handle_t bus, i2c_master_dev_handle_t dev)
 {
     bmp_write(dev, BMP5_REG_CMD, BMP5_SOFT_RESET); // may be NACKed while the chip resets
-    vTaskDelay(pdMS_TO_TICKS(5));
+    vTaskDelay(pdMS_TO_TICKS(10));
+    // A NACK leaves the driver in an error state; reset the bus and retry until the chip answers again.
     uint8_t reg = BMP5_REG_INT_STATUS, v = 0;
-    esp_err_t err = i2c_master_transmit_receive(dev, &reg, 1, &v, 1, 50); // clears the power-on flag
+    esp_err_t err = ESP_FAIL;
+    for (int i = 0; i < 5 && err != ESP_OK; i++) {
+        i2c_master_bus_reset(bus);
+        err = i2c_master_transmit_receive(dev, &reg, 1, &v, 1, 50); // clears the power-on flag
+        if (err != ESP_OK) {
+            vTaskDelay(pdMS_TO_TICKS(5));
+        }
+    }
     if (err == ESP_OK) {
         err = bmp_write(dev, BMP5_REG_ODR_CONFIG, BMP5_DEEP_DIS); // standby before changing the config
     }
@@ -175,7 +183,12 @@ static void scan_bus(const bus_def_t *def, bus_report_t *rep)
             if (i2c_master_transmit_receive(dev, &reg, 1, &id, 1, 50) == ESP_OK) {
                 rep->chip_id[idx] = id;
             }
-            bool keep = !rep->baro && (id == 0x50 || id == 0x51) && baro_init(dev) == ESP_OK;
+            bool keep = false;
+            if (!rep->baro && (id == 0x50 || id == 0x51)) {
+                esp_err_t err = baro_init(bus, dev);
+                ESP_LOGI(TAG, "  0x%02x init: %s", a, esp_err_to_name(err));
+                keep = err == ESP_OK;
+            }
             if (keep) {
                 rep->baro = dev;
             } else {
