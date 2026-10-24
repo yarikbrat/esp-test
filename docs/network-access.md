@@ -27,10 +27,10 @@ IP-адрес `192.168.144.10`, длина префикса (или маска) 
 Посмотреть имя подключения: `netsh interface ipv4 show interfaces` (обычно `Ethernet`).
 
 ```
-netsh interface ipv4 set address name="Ethernet" static 192.168.144.10 255.255.255.0
+netsh interface ipv4 set address name="Ethernet" source=static address=192.168.144.10 mask=255.255.255.0
 ```
 
-Вернуть автоматическую настройку: `netsh interface ipv4 set address name="Ethernet" dhcp`.
+Вернуть автоматическую настройку: `netsh interface ipv4 set address name="Ethernet" source=dhcp`.
 
 На ПК разработчика разъёму `Ethernet` назначены сразу два адреса, 192.168.1.10 и 192.168.144.10: первый нужен,
 чтобы видеть модуль с заводскими настройками (192.168.1.254). Как это сделано: `docs/hardware-log.md`.

@@ -6,7 +6,7 @@
 
 - Архітектура, задачі FreeRTOS, формати збереження: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - Протокол перевірок за розділом 8 ТЗ: [`docs/TEST_PROTOCOL.md`](docs/TEST_PROTOCOL.md)
-- Робочі нотатки під час збирання (російською): `docs/hardware-log.md` — журнал, `docs/connections.md` — фактичне
+- Робочі нотатки під час збирання (російською): `docs/cheatsheet.md` — шпаргалка команд, `docs/hardware-log.md` — журнал, `docs/connections.md` — фактичне
   підключення, `docs/wiring.md` — пояснення схеми, `docs/uart-to-eth-b.md` — дослідження модуля,
   `docs/network-access.md` — доступ із різних комп'ютерів, `docs/photos/` — фото.
 
