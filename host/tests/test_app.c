@@ -64,16 +64,20 @@ void test_stand(void)
     stand_zero_persisted(&s, 0, true);
     CHECK_EQ_INT(s.baro[0].persist, PERSIST_OK);
 
-    // Lift: lower pressure -> positive altitude.
+    // Lift: lower pressure -> positive altitude, reached once the 1 s average window has refilled.
     feed_baro(&s, 0, 99970.0f, 1650, 1700, NULL);
     CHECK(stand_baro_altitude(&s.baro[0], 1700, &h));
+    CHECK(h > 0.1f && h < 0.4f); // 2 of 20 samples are new
+    feed_baro(&s, 0, 99970.0f, 1750, 2650, NULL);
+    CHECK(stand_baro_altitude(&s.baro[0], 2650, &h));
     CHECK(h > 2.0f && h < 3.0f);
+    CHECK_NEAR(s.baro[0].c.value, 99970.0, 0.01);
 
     // Failed calibration keeps the previous p0: sensor drops out during the run.
     float p0_before = s.baro[0].zero.p0_pa;
-    CHECK_EQ_INT(stand_zero_start(&s, 0, 1700), STAND_ZERO_STARTED);
+    CHECK_EQ_INT(stand_zero_start(&s, 0, 2650), STAND_ZERO_STARTED);
     ev = STAND_EV_NONE;
-    for (uint32_t t = 1750; t <= 5000; t += 50) {
+    for (uint32_t t = 2700; t <= 6000; t += 50) {
         stand_event_t e = stand_baro_sample(&s, 0, SS_COMM_ERROR, NAN, t);
         if (e != STAND_EV_NONE) {
             ev = e;
@@ -82,7 +86,7 @@ void test_stand(void)
     CHECK_EQ_INT(ev, STAND_EV_ZERO_FAILED);
     CHECK_EQ_INT(s.baro[0].cal_err, CAL_ERR_TIMEOUT);
     CHECK(s.baro[0].zero.set && s.baro[0].zero.p0_pa == p0_before);
-    CHECK(!stand_baro_altitude(&s.baro[0], 5000, &h)); // no fresh data -> no number
+    CHECK(!stand_baro_altitude(&s.baro[0], 6000, &h)); // no fresh data -> no number
 
     // Calibration timeout when the driver stops calling sample() entirely.
     feed_baro(&s, 1, 100500.0f, 5000, 5100, NULL);
@@ -116,6 +120,28 @@ void test_stand(void)
     zero_cfg_t z = {.set = true, .p0_pa = 100100.0f};
     stand_load_zero(&s, 1, &z, ST_LOADED);
     CHECK_EQ_INT(s.baro[1].origin, ZO_RESTORED);
+}
+
+// Pressure is the mean of the last STAND_BARO_AVG_N valid samples; an outage restarts the window.
+void test_baro_average(void)
+{
+    stand_t s;
+    stand_init(&s);
+    uint32_t t = 0;
+    for (int i = 0; i < STAND_BARO_AVG_N; i++, t += 50) {
+        stand_baro_sample(&s, 0, SS_OK, (i % 2) ? 100002.0f : 99998.0f, t); // +-2 Pa noise
+    }
+    CHECK_NEAR(s.baro[0].c.value, 100000.0, 0.01);
+    stand_baro_sample(&s, 0, SS_COMM_ERROR, NAN, t); // a failed read is not averaged
+    CHECK_NEAR(s.baro[0].c.value, 100000.0, 0.01);
+    for (int i = 0; i < STAND_BARO_AVG_N; i++, t += 50) {
+        stand_baro_sample(&s, 0, SS_OK, 100100.0f, t);
+    }
+    CHECK_NEAR(s.baro[0].c.value, 100100.0, 0.01); // old samples fully replaced
+    t += STAND_BARO_STALE_MS + 50; // outage longer than the stale limit
+    stand_baro_sample(&s, 0, SS_OK, 99000.0f, t);
+    CHECK_NEAR(s.baro[0].c.value, 99000.0, 0.01); // window restarted, no pre-outage mix
+    CHECK_NEAR(s.baro[1].c.value, 0.0, 0.01); // other channel untouched
 }
 
 void test_jsonw(void)

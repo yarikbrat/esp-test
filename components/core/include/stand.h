@@ -16,6 +16,7 @@ extern "C" {
 #define STAND_BARO_STALE_MS 1000u
 #define STAND_SONAR_STALE_MS 500u
 #define STAND_SONAR_MEDIAN  5
+#define STAND_BARO_AVG_N    20 // moving average of pressure: 1 s at the 20 Hz poll rate
 
 // Driver-reported status of one read attempt; values are stored in log records, keep stable.
 typedef enum {
@@ -64,7 +65,9 @@ typedef struct {
 } chan_t;
 
 typedef struct {
-    chan_t c;
+    chan_t c; // c.value is the moving average of the last STAND_BARO_AVG_N valid samples
+    float avg_win[STAND_BARO_AVG_N];
+    uint8_t avg_n, avg_pos;
     zero_cfg_t zero;
     zero_origin_t origin;
     st_origin_t load_origin; // how the zero entry looked at boot

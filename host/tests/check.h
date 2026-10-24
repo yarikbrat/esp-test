@@ -44,5 +44,6 @@ void test_form(void);
 void test_histlog(void);
 void test_settings(void);
 void test_stand(void);
+void test_baro_average(void);
 void test_jsonw(void);
 void test_api(void);

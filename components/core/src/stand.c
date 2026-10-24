@@ -51,10 +51,24 @@ stand_event_t stand_baro_sample(stand_t *s, int ch, sensor_status_t st, float p_
     baro_t *b = &s->baro[ch];
     bool ok = st == SS_OK && baro_pressure_plausible(p_pa);
     if (ok) {
+        // After an outage the window restarts, so pre-outage samples never mix with new ones.
+        if (!stand_chan_fresh(&b->c, STAND_BARO_STALE_MS, now_ms)) {
+            b->avg_n = 0;
+            b->avg_pos = 0;
+        }
+        b->avg_win[b->avg_pos] = p_pa;
+        b->avg_pos = (uint8_t)((b->avg_pos + 1) % STAND_BARO_AVG_N);
+        if (b->avg_n < STAND_BARO_AVG_N) {
+            b->avg_n++;
+        }
+        double sum = 0; // recomputed each time, so rounding never accumulates
+        for (int i = 0; i < b->avg_n; i++) {
+            sum += b->avg_win[i];
+        }
         b->c.status = SS_OK;
         b->c.ever_ok = true;
         b->c.last_ok_ms = now_ms;
-        b->c.value = p_pa;
+        b->c.value = (float)(sum / b->avg_n);
     } else {
         b->c.status = st == SS_OK ? SS_OUT_OF_RANGE : st;
         b->c.errors++;

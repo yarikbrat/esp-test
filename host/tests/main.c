@@ -13,6 +13,7 @@ int main(void)
     test_histlog();
     test_settings();
     test_stand();
+    test_baro_average();
     test_jsonw();
     test_api();
     printf("%d checks, %d failures\n", g_checks, g_failures);
