@@ -29,6 +29,7 @@ section{background:var(--card);border:1px solid var(--line);border-radius:10px;p
 button{font:inherit;padding:7px 12px;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer}
 button.primary{background:var(--acc);border-color:var(--acc);color:var(--accfg)}
 button:disabled{opacity:.5;cursor:default}
+button[aria-pressed="true"]{border-color:var(--acc);box-shadow:inset 0 0 0 1px var(--acc);font-weight:600}
 input{font:inherit;padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--fg);width:100%}
 input[type=checkbox]{width:auto}
 label{display:block;margin:6px 0 2px;color:var(--mute)}
@@ -102,10 +103,11 @@ a{color:var(--acc)}
     <div class="row"><span>Заповнення сховища</span><span id="logFill">—</span></div>
     <div class="row"><span>Помилки запису</span><span id="logErr">—</span></div>
     <div class="actions">
-      <button id="logLoad">Показати останні записи</button>
-      <button id="logOlder" disabled>Старіші записи</button>
+      <button id="logLoad" aria-pressed="false">Показати останні записи</button>
+      <button id="logOlder" aria-pressed="false" disabled>Старіші записи</button>
       <button id="logClear">Очистити історію</button>
     </div>
+    <div class="note" id="logMode" hidden></div>
     <div class="tablewrap">
       <table id="logTable" hidden>
         <thead>
@@ -374,6 +376,7 @@ async function loadLogPage(append) {
   olderBefore = res.data.next_before;
   if (!append) { logLive = true; logTop = res.data.records.length ? res.data.records[0].seq : -1; }
   else logLive = false; // older pages are being browsed; keep the table still
+  renderLogMode();
   if (!tb.children.length) setMsg(m, emptyLogText(), "mute");
 }
 function logRow(r) {
@@ -390,6 +393,16 @@ function emptyLogText() {
   const l = last && last.log;
   if (!l || !l.enabled) return "Записів немає. Журналювання вимкнено: увімкніть його й натисніть «Зберегти налаштування».";
   return "Записів поки немає. Перший запис з'явиться через " + l.interval_s + " с після збереження налаштувань.";
+}
+
+// Shows which view of the history is on screen: the live newest records or older pages.
+function renderLogMode() {
+  const shown = !$("#logTable").hidden, mode = $("#logMode");
+  $("#logLoad").setAttribute("aria-pressed", String(shown && logLive));
+  $("#logOlder").setAttribute("aria-pressed", String(shown && !logLive));
+  mode.hidden = !shown;
+  mode.textContent = logLive ? "Показано останні записи, нові додаються автоматично."
+    : "Показано також старіші записи, нові не додаються. Щоб повернутися, натисніть «Показати останні записи».";
 }
 
 // While the newest page is shown, new records are prepended as the logger writes them.
@@ -418,6 +431,7 @@ async function logLiveTick() {
       $("#logOlder").disabled = false;
     }
     $("#logTable").hidden = false;
+    renderLogMode();
     const m = $("#logMsg");
     if (m.classList.contains("mute")) setMsg(m, "", "");
   } finally {
@@ -433,6 +447,7 @@ $("#logClear").addEventListener("click", async () => {
   if (res.ok) {
     $("#logTable tbody").textContent = ""; $("#logTable").hidden = true; olderBefore = null; $("#logOlder").disabled = true;
     logLive = true; logTop = -1; logLiveAt = Date.now();
+    renderLogMode();
   }
 });
 
