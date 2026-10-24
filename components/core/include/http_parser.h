@@ -15,6 +15,7 @@ extern "C" {
 #define HTTP_MAX_SKIP         2048 // largest rejected body we skip instead of resyncing
 #define HTTP_MAX_PATH         96
 #define HTTP_MAX_QUERY        96
+#define HTTP_MAX_HOST         64
 #define HTTP_IDLE_TIMEOUT_MS  2000 // max gap between bytes inside a request
 #define HTTP_TOTAL_TIMEOUT_MS 5000 // max time from first byte
 
@@ -29,6 +30,7 @@ typedef struct {
     char path[HTTP_MAX_PATH + 1];
     char query[HTTP_MAX_QUERY + 1]; // without '?', not decoded
     bool accept_gzip;
+    char host[HTTP_MAX_HOST + 1]; // Host header without the port; "" if absent or too long
     size_t body_len;
     char body[HTTP_MAX_BODY + 1]; // always NUL-terminated
 } http_request_t;

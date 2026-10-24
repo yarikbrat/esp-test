@@ -114,8 +114,21 @@ void test_http(void)
         CHECK(strcmp(fr.last.path, "/api/state") == 0);
         CHECK(strcmp(fr.last.query, "x=1") == 0);
         CHECK(fr.last.accept_gzip);
+        CHECK(strcmp(fr.last.host, "192.168.144.36") == 0);
         CHECK(!http_parser_busy(&p));
     }
+
+    // Host: port is dropped, an absent or oversized Host gives "", and it never leaks into the next request.
+    http_parser_init(&p);
+    feed_result_t fh = feed_str(&p, "GET / HTTP/1.1\r\nhost:  10.0.0.5:8080 \r\n\r\n", 4096, 0);
+    CHECK(fh.requests == 1 && strcmp(fh.last.host, "10.0.0.5") == 0);
+    fh = feed_str(&p, "GET / HTTP/1.1\r\n\r\n", 4096, 0);
+    CHECK(fh.requests == 1 && fh.last.host[0] == '\0');
+    char longhost[200] = "GET / HTTP/1.1\r\nHost: ";
+    memset(longhost + strlen(longhost), 'a', HTTP_MAX_HOST + 1);
+    strcat(longhost, "\r\n\r\n");
+    fh = feed_str(&p, longhost, 4096, 0);
+    CHECK(fh.requests == 1 && fh.last.host[0] == '\0');
 
     // Two pipelined requests in one chunk, then a POST whose body is split.
     http_parser_init(&p);

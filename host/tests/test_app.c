@@ -174,6 +174,10 @@ typedef struct {
     stand_zero_start_t zero_ret;
     int zero_calls, reset_calls, cfg_calls, clear_calls;
     log_cfg_t last_cfg;
+    int prepare_calls;
+    bool pending;
+    netcfg_t pending_cfg;
+    char host[HTTP_MAX_HOST + 1]; // Host header of the next call
     char out[16384];
     size_t out_len;
 } fake_t;
@@ -189,6 +193,21 @@ static persist_t f_cfg(void *ctx, const log_cfg_t *c)
     return PERSIST_OK;
 }
 static bool f_clear(void *ctx) { ((fake_t *)ctx)->clear_calls++; return true; }
+static void f_prepare(void *ctx, const netcfg_t *c)
+{
+    fake_t *f = ctx;
+    f->prepare_calls++;
+    f->pending = true;
+    f->pending_cfg = *c;
+}
+static bool f_pending(void *ctx, netcfg_t *out)
+{
+    fake_t *f = ctx;
+    if (f->pending) {
+        *out = f->pending_cfg;
+    }
+    return f->pending;
+}
 static size_t f_read(void *ctx, uint32_t before, hl_record_t *out, size_t max, uint32_t *next_before)
 {
     (void)ctx;
@@ -227,6 +246,7 @@ static api_after_t call(fake_t *f, http_method_t m, const char *path, const char
     api_backend_t b = {
         .ctx = f, .snapshot = f_snapshot, .zero_start = f_zero, .zero_reset = f_reset,
         .log_config = f_cfg, .log_clear = f_clear, .log_read = f_read,
+        .net_prepare = f_prepare, .net_pending = f_pending,
         .page = page, .page_len = sizeof(page) - 1, .page_gz = page_gz, .page_gz_len = 2,
         .http_port = 80,
     };
@@ -239,6 +259,7 @@ static api_after_t call(fake_t *f, http_method_t m, const char *path, const char
     strcpy(req.body, body ? body : "");
     req.body_len = strlen(req.body);
     req.accept_gzip = gzip;
+    strcpy(req.host, f->host);
     f->out_len = 0;
     f->out[0] = '\0';
     char scratch[6144];
@@ -334,14 +355,34 @@ void test_api(void)
     call(f, HTTP_GET, "/api/log", "before=1&limit=20", NULL, false);
     CHECK(has(f, "\"seq\":0") && has(f, "\"next_before\":null"));
 
-    // Network: invalid input never schedules an apply.
+    // Network: invalid input never prepares a change.
+    strcpy(f->host, "192.168.144.36");
     api_after_t a = call(f, HTTP_POST, "/api/net", NULL, "ip=192.168.144.0&mask=255.255.255.0&gw=", false);
-    CHECK(has(f, "422") && has(f, "ip_host_part") && !a.net_apply);
+    CHECK(has(f, "422") && has(f, "ip_host_part") && !a.net_apply && f->prepare_calls == 0);
     a = call(f, HTTP_POST, "/api/net", NULL, "ip=10.1.1.1", false);
-    CHECK(has(f, "400") && !a.net_apply);
+    CHECK(has(f, "400") && !a.net_apply && f->prepare_calls == 0);
+    // Valid input: pending only, plus the form the page must send to the module.
     a = call(f, HTTP_POST, "/api/net", NULL, "ip=192.168.144.50&mask=255.255.255.0&gw=192.168.144.1", false);
-    CHECK(has(f, "200 OK") && has(f, "http://192.168.144.50/") && a.net_apply);
-    CHECK(a.net.ip == 0xC0A89032u && a.net.gw == 0xC0A89001u);
+    CHECK(has(f, "200 OK") && has(f, "\"url\":\"http://192.168.144.50/\"") && !a.net_apply);
+    CHECK(f->prepare_calls == 1 && f->pending_cfg.ip == 0xC0A89032u && f->pending_cfg.gw == 0xC0A89001u);
+    CHECK(has(f, "\"module_url\":\"http://192.168.144.36:8000/\""));
+    CHECK(has(f, "lca=192.168.144.50&lcp=80&wbp=8000") && has(f, "lcm=255.255.255.0&lcg=192.168.144.1"));
+    CHECK(has(f, "bdr=B&dtb=0&prt=0&stb=0&flc=0&ndr=0") && has(f, "post=Submit"));
+    // Requests at the old address do not apply it; the first one at the new address does.
+    a = call(f, HTTP_GET, "/api/state", NULL, NULL, false);
+    CHECK(!a.net_apply);
+    strcpy(f->host, "stand.local");
+    a = call(f, HTTP_GET, "/api/state", NULL, NULL, false);
+    CHECK(!a.net_apply);
+    strcpy(f->host, "192.168.144.50");
+    a = call(f, HTTP_GET, "/api/state", NULL, NULL, false);
+    CHECK(a.net_apply && a.net.ip == 0xC0A89032u && a.net.gw == 0xC0A89001u && has(f, "200 OK"));
+    // Without a usable Host the module URL falls back to the active address from the snapshot.
+    f->pending = false;
+    f->host[0] = '\0';
+    f->snap.net.ip = 0x0A000005u;
+    a = call(f, HTTP_POST, "/api/net", NULL, "ip=10.0.0.6&mask=255.0.0.0&gw=", false);
+    CHECK(has(f, "\"module_url\":\"http://10.0.0.5:8000/\"") && has(f, "lcg=0.0.0.0") && !a.net_apply);
 
     free(f);
 }

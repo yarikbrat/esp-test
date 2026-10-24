@@ -132,7 +132,7 @@ a{color:var(--acc)}
       <div><button class="primary" type="submit">Зберегти та застосувати</button></div>
     </form>
     <div class="msg" id="netMsg" role="status" aria-live="polite"></div>
-    <div class="note">Якщо доступ за мережею втрачено: утримуйте кнопку BOOT на ESP32 5 с після ввімкнення живлення — стенд повернеться до адреси 192.168.144.36, маска 255.255.255.0.</div>
+    <div class="note">Адресу зберігає сам модуль Ethernet, ESP32 записує її у свою пам'ять, коли стенд відповів за новою адресою. Якщо доступ втрачено: знайдіть модуль програмою VirCom (Search) або командою <code>arp -a</code>, відкрийте його налаштування на порту 8000 і поверніть 192.168.144.36; потім утримуйте BOOT на ESP32 5 с, щоб і ESP32 повернулася до початкових налаштувань. Докладно — у README.</div>
   </section>
   <div class="note" id="diag"></div>
 </main>
@@ -277,9 +277,10 @@ function renderLink() {
   if (!ok && last) document.querySelectorAll(".big").forEach(b => b.classList.add("stale"));
 }
 
+let netBusy = false; // polling pauses while the page moves the module to a new address
 async function poll() {
   const started = Date.now();
-  const res = await api("GET", "/api/state");
+  const res = netBusy ? { ok: false } : await api("GET", "/api/state");
   if (res.ok) { last = res.data; lastOkAt = Date.now(); render(last); }
   renderLink();
   setTimeout(poll, Math.max(100, 1000 - (Date.now() - started)));
@@ -369,16 +370,57 @@ $("#netForm").addEventListener("submit", async ev => {
   if (gw && !IP_RE.test(gw)) { setMsg(m, "Невірний формат шлюзу", "bad"); return; }
   const port = last ? last.net.port : 80;
   const url = "http://" + ip + (port === 80 ? "" : ":" + port) + "/";
-  if (!confirm("Стенд перейде на адресу " + url + "\nПродовжити?")) return;
+  if (!confirm("Стенд перейде на адресу " + url + "\nКомп'ютер має бути в тій самій мережі, інакше сторінка стане недоступною." +
+               "\nПродовжити?")) return;
+  const btn = $("#netForm button[type=submit]");
+  btn.disabled = true;
+  try { await applyNet(ip, mask, gw, m); } finally { btn.disabled = false; netBusy = false; }
+});
+
+// Plain cross-origin POST: the module's configurator sends no CORS headers, so the reply stays opaque.
+async function postNoCors(url, body) {
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 5000);
+  try { await fetch(url, { method: "POST", mode: "no-cors", body: new URLSearchParams(body), signal: ctl.signal }); }
+  catch (e) { /* the module may drop the connection while it switches address */ }
+  finally { clearTimeout(timer); }
+}
+async function reachable(url) {
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 2500);
+  try { await fetch(url + "api/state", { mode: "no-cors", cache: "no-store", signal: ctl.signal }); return true; }
+  catch (e) { return false; }
+  finally { clearTimeout(timer); }
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// 1) the ESP32 validates and keeps the settings pending; 2) the page sends them to the module's own
+// configurator; 3) the first request at the new address makes the ESP32 store them as active.
+async function applyNet(ip, mask, gw, m) {
   const res = await api("POST", "/api/net", { ip, mask, gw });
   if (!res.ok) { setMsg(m, msgOf(res, "Налаштування не прийнято"), "bad"); return; }
   netFormTouched = false;
-  m.className = "msg ok";
-  m.textContent = (res.data.message || "Налаштування прийнято") + ": ";
+  netBusy = true;
+  await chain; // nothing else may talk to the stand while the module switches
+  setMsg(m, "Налаштовуємо модуль Ethernet…", "warn");
+  await postNoCors(res.data.module_url + "ip_en.html", "lgk=&post=Login");
+  await postNoCors(res.data.module_url + "ok.html", res.data.module_form);
+  setMsg(m, "Перевіряємо нову адресу " + res.data.url + "…", "warn");
+  for (let i = 0; i < 10; i++) {
+    if (await reachable(res.data.url)) {
+      setMsg(m, "Стенд відповідає за новою адресою, відкриваємо її…", "ok");
+      await sleep(800);
+      location.href = res.data.url;
+      return;
+    }
+    await sleep(1000);
+  }
+  m.className = "msg bad";
+  m.textContent = "Нова адреса не відповідає з цього комп'ютера. Якщо модуль перейшов на неї, переведіть мережеву карту " +
+                  "комп'ютера в ту саму мережу та відкрийте ";
   const a = document.createElement("a");
   a.href = res.data.url; a.textContent = res.data.url;
   m.appendChild(a);
-});
+  m.appendChild(document.createTextNode(". Активні налаштування стенда змінюються лише після першого запиту за новою адресою."));
+}
 
 poll();
 </script>

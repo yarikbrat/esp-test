@@ -52,6 +52,7 @@ static bool g_log_clear_req, g_log_clearing;
 static netcfg_t g_net;
 static st_origin_t g_net_origin;
 static net_apply_t g_net_apply;
+static netcfg_t g_net_pending;
 static const char *g_net_apply_msg;
 static uint16_t g_session;
 static http_stats_t g_http_stats;
@@ -276,6 +277,7 @@ static void be_snapshot(void *ctx, api_snapshot_t *o)
     o->net = g_net;
     o->net_origin = g_net_origin;
     o->net_apply = g_net_apply;
+    o->net_pending = g_net_pending;
     o->net_apply_msg = g_net_apply_msg;
     o->http_port = (uint16_t)g_opt.port;
     o->link_known = true;
@@ -344,16 +346,38 @@ static size_t be_log_read(void *ctx, uint32_t before, hl_record_t *out, size_t m
     return n;
 }
 
-static void net_apply(const netcfg_t *cfg)
+// The emulator listens on 127.0.0.1 only, so a request never arrives at the pending address and the
+// change stays pending; the page then reports that the new address is unreachable.
+static void be_net_prepare(void *ctx, const netcfg_t *cfg)
 {
-    // The real firmware reconfigures the module over UART here; the emulator cannot move its IP.
+    (void)ctx;
     char ip[16];
     netcfg_format_ipv4(cfg->ip, ip, sizeof(ip));
-    printf("[net] apply %s (emulated: still listening on port %d)\n", ip, g_opt.port);
+    printf("[net] %s accepted, pending until a request arrives there\n", ip);
     pthread_mutex_lock(&g_lock);
+    g_net_pending = *cfg;
     g_net_apply = NET_APPLY_PENDING;
+    g_net_apply_msg = NULL;
     pthread_mutex_unlock(&g_lock);
-    sleep_ms(300);
+}
+
+static bool be_net_pending(void *ctx, netcfg_t *out)
+{
+    (void)ctx;
+    pthread_mutex_lock(&g_lock);
+    bool p = g_net_apply == NET_APPLY_PENDING;
+    if (p) {
+        *out = g_net_pending;
+    }
+    pthread_mutex_unlock(&g_lock);
+    return p;
+}
+
+static void net_apply(const netcfg_t *cfg)
+{
+    char ip[16];
+    netcfg_format_ipv4(cfg->ip, ip, sizeof(ip));
+    printf("[net] request arrived at %s, saving\n", ip);
     uint8_t buf[ST_NET_BLOB_SIZE];
     size_t n = st_encode_net(cfg, buf, sizeof(buf));
     bool ok = n && kv_set("net", buf, n);
@@ -573,7 +597,7 @@ int main(int argc, char **argv)
     api_backend_t be = {
         .snapshot = be_snapshot, .zero_start = be_zero_start, .zero_reset = be_zero_reset,
         .log_config = be_log_config, .log_clear = be_log_clear, .log_read = be_log_read,
-        .http_port = (uint16_t)g_opt.port,
+        .net_prepare = be_net_prepare, .net_pending = be_net_pending, .http_port = (uint16_t)g_opt.port,
     };
     api_out_t out = {.write = bridge_write};
     if (!load_page()) {

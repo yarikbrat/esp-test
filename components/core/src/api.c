@@ -2,6 +2,7 @@
 
 #include "form.h"
 #include "jsonw.h"
+#include "uart_eth.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -248,6 +249,8 @@ static void render_state(jw_t *w, const api_snapshot_t *s)
     jw_str(w, apply_codes[s->net_apply]);
     jw_raw(w, ",\"apply_msg\":");
     jw_str(w, s->net_apply_msg);
+    jw_raw(w, ",");
+    json_ip(w, "pending_ip", s->net_apply == NET_APPLY_PENDING ? s->net_pending.ip : 0);
     jw_raw(w, ",\"link\":");
     if (s->link_known) {
         jw_raw(w, "{\"cable\":");
@@ -316,6 +319,14 @@ api_after_t api_handle(const api_backend_t *b, const http_request_t *req, const 
     bool is_get = req->method == HTTP_GET || req->method == HTTP_HEAD;
     bool head_only = req->method == HTTP_HEAD;
     bool is_post = req->method == HTTP_POST;
+
+    uint32_t host_ip = 0;
+    bool host_is_ip = netcfg_parse_ipv4(req->host, &host_ip);
+    netcfg_t pending;
+    if (host_is_ip && b->net_pending && b->net_pending(b->ctx, &pending) && pending.ip == host_ip) {
+        after.net_apply = true;
+        after.net = pending;
+    }
 
     if (strcmp(path, "/") == 0 || strcmp(path, "/index.html") == 0) {
         if (!is_get) {
@@ -437,23 +448,41 @@ api_after_t api_handle(const api_backend_t *b, const http_request_t *req, const 
             send_fail(out, 422, netcfg_err_code(err), netcfg_err_text(err), scratch, cap);
             return after;
         }
-        jw_t w;
-        jw_init(&w, scratch, cap);
-        jw_raw(&w, "{\"ok\":true,\"message\":");
-        jw_str(&w, "Налаштування прийнято, стенд перемикається на нову адресу");
-        jw_raw(&w, ",\"url\":");
-        char url[40];
+        if (b->net_prepare) {
+            b->net_prepare(b->ctx, &cfg);
+        }
+        // The page sends module_form to the module itself; this ESP32 cannot reach its configurator.
+        char form[400], url[40], mod_url[40], mod_host[16];
+        if (!uart_eth_form(&cfg, form, sizeof(form))) {
+            send_fail(out, 500, "internal", "Внутрішня помилка", scratch, cap);
+            return after;
+        }
         netcfg_format_ipv4(cfg.ip, ip, sizeof(ip));
         if (b->http_port == 80) {
             snprintf(url, sizeof(url), "http://%s/", ip);
         } else {
             snprintf(url, sizeof(url), "http://%s:%u/", ip, (unsigned)b->http_port);
         }
+        if (host_is_ip) {
+            netcfg_format_ipv4(host_ip, mod_host, sizeof(mod_host)); // where the browser reached us
+        } else {
+            api_snapshot_t snap;
+            b->snapshot(b->ctx, &snap);
+            netcfg_format_ipv4(snap.net.ip, mod_host, sizeof(mod_host));
+        }
+        snprintf(mod_url, sizeof(mod_url), "http://%s:%u/", mod_host, (unsigned)UART_ETH_WEB_PORT);
+        jw_t w;
+        jw_init(&w, scratch, cap);
+        jw_raw(&w, "{\"ok\":true,\"message\":");
+        jw_str(&w, "Налаштування перевірено, налаштовуємо модуль Ethernet");
+        jw_raw(&w, ",\"url\":");
         jw_str(&w, url);
+        jw_raw(&w, ",\"module_url\":");
+        jw_str(&w, mod_url);
+        jw_raw(&w, ",\"module_form\":");
+        jw_str(&w, form);
         jw_raw(&w, "}");
         send_json(out, 200, &w, false);
-        after.net_apply = true;
-        after.net = cfg;
     } else {
         send_fail(out, 404, "not_found", "Сторінку не знайдено", scratch, cap);
     }

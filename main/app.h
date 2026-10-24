@@ -31,6 +31,7 @@ typedef struct {
     int log_last_error;
 
     netcfg_t net;
+    netcfg_t net_pending; // valid while net_apply == NET_APPLY_PENDING
     st_origin_t net_origin;
     net_apply_t net_apply;
     const char *net_apply_msg;

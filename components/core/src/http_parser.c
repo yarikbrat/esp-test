@@ -114,6 +114,13 @@ static int parse_headers(http_parser_t *p, char *line, char *end)
             return 501; // chunked request bodies are not supported
         } else if (name_is(line, nlen, "Accept-Encoding")) {
             p->req.accept_gzip = contains_token_ci(val, vlen, "gzip");
+        } else if (name_is(line, nlen, "Host")) {
+            char *colon2 = memchr(val, ':', vlen); // drop ":port"
+            size_t hlen = colon2 ? (size_t)(colon2 - val) : vlen;
+            if (hlen <= HTTP_MAX_HOST) {
+                memcpy(p->req.host, val, hlen);
+                p->req.host[hlen] = '\0';
+            }
         }
         line = nl + 1;
     }

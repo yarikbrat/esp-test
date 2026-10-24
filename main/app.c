@@ -123,6 +123,7 @@ static void be_snapshot(void *ctx, api_snapshot_t *o)
     o->net = g_app.net;
     o->net_origin = g_app.net_origin;
     o->net_apply = g_app.net_apply;
+    o->net_pending = g_app.net_pending;
     o->net_apply_msg = g_app.net_apply_msg;
     o->http_port = HTTP_PORT;
     o->link_known = false; // LINK/LINK2 are not wired
@@ -198,6 +199,31 @@ static size_t be_log_read(void *ctx, uint32_t before, hl_record_t *out, size_t m
     return n;
 }
 
+static void be_net_prepare(void *ctx, const netcfg_t *cfg)
+{
+    (void)ctx;
+    char ip[16];
+    netcfg_format_ipv4(cfg->ip, ip, sizeof(ip));
+    app_lock();
+    g_app.net_pending = *cfg;
+    g_app.net_apply = NET_APPLY_PENDING;
+    g_app.net_apply_msg = NULL;
+    app_unlock();
+    ESP_LOGI(TAG, "net settings %s accepted, waiting for a request at that address", ip);
+}
+
+static bool be_net_pending(void *ctx, netcfg_t *out)
+{
+    (void)ctx;
+    app_lock();
+    bool p = g_app.net_apply == NET_APPLY_PENDING;
+    if (p) {
+        *out = g_app.net_pending;
+    }
+    app_unlock();
+    return p;
+}
+
 api_backend_t app_backend(void)
 {
     return (api_backend_t){
@@ -207,6 +233,8 @@ api_backend_t app_backend(void)
         .log_config = be_log_config,
         .log_clear = be_log_clear,
         .log_read = be_log_read,
+        .net_prepare = be_net_prepare,
+        .net_pending = be_net_pending,
         .page = page_start,
         .page_len = (size_t)(page_end - page_start),
         .page_gz = page_gz_start,
@@ -217,27 +245,24 @@ api_backend_t app_backend(void)
 
 // --- Network settings ---------------------------------------------------------------------------
 
-// The ESP32 has no network interface of its own: the address lives in the UART TO ETH module.
-// Here the new settings are stored in NVS; the web page moves the module itself (docs/uart-to-eth-b.md).
+// The address lives in the UART TO ETH module; the page moves the module (docs/uart-to-eth-b.md). This runs
+// once a request has arrived at the new address, and stores the settings as the active ones.
 void app_net_apply(const netcfg_t *cfg)
 {
     char ip[16];
     netcfg_format_ipv4(cfg->ip, ip, sizeof(ip));
-    app_lock();
-    g_app.net_apply = NET_APPLY_PENDING;
-    app_unlock();
     uint8_t buf[ST_NET_BLOB_SIZE];
     size_t n = st_encode_net(cfg, buf, sizeof(buf));
     bool ok = n && kv_set("net", buf, n);
     app_lock();
+    g_app.net = *cfg; // the module already answers at this address, saved or not
     if (ok) {
-        g_app.net = *cfg;
         g_app.net_origin = ST_LOADED;
         g_app.net_apply = NET_APPLY_OK;
         g_app.net_apply_msg = NULL;
     } else {
         g_app.net_apply = NET_APPLY_FAILED;
-        g_app.net_apply_msg = "Не вдалося зберегти налаштування мережі";
+        g_app.net_apply_msg = "Адресу застосовано, але не збережено в пам'яті ESP32";
     }
     app_unlock();
     ESP_LOGI(TAG, "net settings %s saved: %s", ip, ok ? "ok" : "FAILED");
