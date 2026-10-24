@@ -83,11 +83,16 @@ static const char *cal_text(const baro_t *b)
     }
 }
 
+// X-Req-Id of the request being answered. The module copies every reply to all TCP connections, so the
+// page compares this echo with its own id to spot replies meant for another tab. api_handle runs in one task.
+static char s_rid_header[HTTP_MAX_RID + 16];
+
 static int send(const api_out_t *out, int status, const char *ctype, const void *body, size_t len,
                 const char *extra, bool head_only)
 {
-    char head[256];
-    size_t n = http_format_head(head, sizeof(head), status, ctype, len, extra);
+    char head[320], hdrs[96];
+    snprintf(hdrs, sizeof(hdrs), "%s%s", extra ? extra : "", s_rid_header);
+    size_t n = http_format_head(head, sizeof(head), status, ctype, len, hdrs[0] ? hdrs : NULL);
     if (n == 0) {
         return -1;
     }
@@ -316,6 +321,11 @@ api_after_t api_handle(const api_backend_t *b, const http_request_t *req, const 
 {
     api_after_t after = {0};
     const char *path = req->path;
+    if (req->rid[0]) {
+        snprintf(s_rid_header, sizeof(s_rid_header), "X-Req-Id: %s\r\n", req->rid);
+    } else {
+        s_rid_header[0] = '\0';
+    }
     bool is_get = req->method == HTTP_GET || req->method == HTTP_HEAD;
     bool head_only = req->method == HTTP_HEAD;
     bool is_post = req->method == HTTP_POST;
@@ -491,6 +501,7 @@ api_after_t api_handle(const api_backend_t *b, const http_request_t *req, const 
 
 void api_send_error(const api_out_t *out, int status, bool head_only, char *scratch, size_t cap)
 {
+    s_rid_header[0] = '\0'; // the failed request was never parsed
     const char *msg;
     switch (status) {
     case 413: msg = "Запит завеликий"; break;

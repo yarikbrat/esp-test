@@ -178,6 +178,7 @@ typedef struct {
     bool pending;
     netcfg_t pending_cfg;
     char host[HTTP_MAX_HOST + 1]; // Host header of the next call
+    char rid[HTTP_MAX_RID + 1];   // X-Req-Id of the next call
     char out[16384];
     size_t out_len;
 } fake_t;
@@ -260,6 +261,7 @@ static api_after_t call(fake_t *f, http_method_t m, const char *path, const char
     req.body_len = strlen(req.body);
     req.accept_gzip = gzip;
     strcpy(req.host, f->host);
+    strcpy(req.rid, f->rid);
     f->out_len = 0;
     f->out[0] = '\0';
     char scratch[6144];
@@ -354,6 +356,16 @@ void test_api(void)
     CHECK(has(f, "\"next_before\":1") && has(f, "\"alt_m\":null"));
     call(f, HTTP_GET, "/api/log", "before=1&limit=20", NULL, false);
     CHECK(has(f, "\"seq\":0") && has(f, "\"next_before\":null"));
+
+    // Request id is echoed so the page can spot replies meant for another tab; never left over.
+    strcpy(f->rid, "17");
+    call(f, HTTP_GET, "/api/state", NULL, NULL, false);
+    CHECK(has(f, "X-Req-Id: 17\r\n"));
+    call(f, HTTP_GET, "/", NULL, NULL, true);
+    CHECK(has(f, "Content-Encoding: gzip\r\nX-Req-Id: 17\r\n"));
+    f->rid[0] = '\0';
+    call(f, HTTP_GET, "/api/state", NULL, NULL, false);
+    CHECK(!has(f, "X-Req-Id"));
 
     // Network: invalid input never prepares a change.
     strcpy(f->host, "192.168.144.36");

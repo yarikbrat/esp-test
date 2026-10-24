@@ -114,6 +114,16 @@ static int parse_headers(http_parser_t *p, char *line, char *end)
             return 501; // chunked request bodies are not supported
         } else if (name_is(line, nlen, "Accept-Encoding")) {
             p->req.accept_gzip = contains_token_ci(val, vlen, "gzip");
+        } else if (name_is(line, nlen, "X-Req-Id")) {
+            bool clean = vlen > 0 && vlen <= HTTP_MAX_RID;
+            for (size_t i = 0; clean && i < vlen; i++) {
+                char c = val[i];
+                clean = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+            }
+            if (clean) { // echoed into a response header, so nothing else may pass
+                memcpy(p->req.rid, val, vlen);
+                p->req.rid[vlen] = '\0';
+            }
         } else if (name_is(line, nlen, "Host")) {
             char *colon2 = memchr(val, ':', vlen); // drop ":port"
             size_t hlen = colon2 ? (size_t)(colon2 - val) : vlen;

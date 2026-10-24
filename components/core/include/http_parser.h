@@ -16,6 +16,7 @@ extern "C" {
 #define HTTP_MAX_PATH         96
 #define HTTP_MAX_QUERY        96
 #define HTTP_MAX_HOST         64
+#define HTTP_MAX_RID          16
 #define HTTP_IDLE_TIMEOUT_MS  2000 // max gap between bytes inside a request
 #define HTTP_TOTAL_TIMEOUT_MS 5000 // max time from first byte
 
@@ -31,6 +32,7 @@ typedef struct {
     char query[HTTP_MAX_QUERY + 1]; // without '?', not decoded
     bool accept_gzip;
     char host[HTTP_MAX_HOST + 1]; // Host header without the port; "" if absent or too long
+    char rid[HTTP_MAX_RID + 1];   // X-Req-Id header, letters and digits only; "" otherwise
     size_t body_len;
     char body[HTTP_MAX_BODY + 1]; // always NUL-terminated
 } http_request_t;

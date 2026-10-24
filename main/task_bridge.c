@@ -14,6 +14,19 @@ static const char *TAG = "bridge";
 static http_parser_t s_parser;
 static char s_scratch[8192];
 
+// One log line with the start of a rejected request, non-printable bytes as \xNN.
+static void log_head(const char *what)
+{
+    char line[200];
+    size_t n = 0, lim = s_parser.head_len < 48 ? s_parser.head_len : 48;
+    for (size_t i = 0; i < lim && n + 5 < sizeof(line); i++) {
+        unsigned char c = (unsigned char)s_parser.head[i];
+        n += (size_t)snprintf(line + n, sizeof(line) - n, (c >= 0x20 && c < 0x7f) ? "%c" : "\\x%02x", c);
+    }
+    line[n] = '\0';
+    ESP_LOGW(TAG, "%s (%u bytes): %s", what, (unsigned)s_parser.head_len, line);
+}
+
 static int uart_sink(void *ctx, const void *data, size_t len)
 {
     (void)ctx;
@@ -56,12 +69,17 @@ void task_bridge(void *arg)
                 }
             } else if (ev == HTTP_EV_ERROR) {
                 ESP_LOGW(TAG, "bad request, status %d", s_parser.error_status);
+                log_head("rejected");
                 api_send_error(&out, s_parser.error_status, s_parser.error_head, s_scratch, sizeof(s_scratch));
             }
         }
-        if (http_parser_tick(&s_parser, app_now_ms())) {
-            ESP_LOGW(TAG, "incomplete request dropped (timeout)");
+        if (http_parser_busy(&s_parser) && s_parser.head_len) {
+            uint32_t now = app_now_ms();
+            if (now - s_parser.last_ms > HTTP_IDLE_TIMEOUT_MS || now - s_parser.start_ms > HTTP_TOTAL_TIMEOUT_MS) {
+                log_head("incomplete request dropped (timeout)");
+            }
         }
+        http_parser_tick(&s_parser, app_now_ms());
         app_lock();
         g_app.http = s_parser.stats;
         app_unlock();

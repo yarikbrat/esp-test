@@ -130,6 +130,16 @@ void test_http(void)
     fh = feed_str(&p, longhost, 4096, 0);
     CHECK(fh.requests == 1 && fh.last.host[0] == '\0');
 
+    // X-Req-Id is echoed into a response header: only short alphanumeric values are kept.
+    fh = feed_str(&p, "GET / HTTP/1.1\r\nx-req-id: 42abc\r\n\r\n", 4096, 0);
+    CHECK(fh.requests == 1 && strcmp(fh.last.rid, "42abc") == 0);
+    fh = feed_str(&p, "GET / HTTP/1.1\r\nX-Req-Id: 4 2\r\n\r\n", 4096, 0);
+    CHECK(fh.requests == 1 && fh.last.rid[0] == '\0');
+    fh = feed_str(&p, "GET / HTTP/1.1\r\nX-Req-Id: 12345678901234567\r\n\r\n", 4096, 0);
+    CHECK(fh.requests == 1 && fh.last.rid[0] == '\0');
+    fh = feed_str(&p, "GET / HTTP/1.1\r\n\r\n", 4096, 0);
+    CHECK(fh.requests == 1 && fh.last.rid[0] == '\0');
+
     // Two pipelined requests in one chunk, then a POST whose body is split.
     http_parser_init(&p);
     feed_result_t fr = feed_str(&p,
