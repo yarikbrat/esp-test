@@ -56,13 +56,49 @@ idf.py build
 idf.py -p /dev/ttyUSB0 -b 460800 flash monitor
 ```
 
-Готовий образ після збирання: `build/baro_stand.bin`, таблиця розділів `partitions.csv`
-(`nvs` 24 КБ, `factory` 1.5 МБ, `histlog` 256 КБ).
+Таблиця розділів `partitions.csv`: `nvs` 24 КБ, `factory` 1.5 МБ, `histlog` 256 КБ.
+
+### Готова прошивка (без збирання)
+
+Каталог `firmware/` містить зібрані образи; версія і коміт — у `firmware/VERSION.txt`, контрольні суми —
+у `SHA256SUMS.txt`. Оновити їх після змін у коді: `./tools/make-release.sh`.
+
+| Файл | Адреса | Навіщо |
+|---|---|---|
+| `baro_stand_full.bin` | `0x0` | усе в одному файлі, для нової плати |
+| `bootloader.bin` | `0x1000` | завантажувач |
+| `partition-table.bin` | `0x8000` | таблиця розділів |
+| `baro_stand.bin` | `0x10000` | програма |
+
+**Нова плата, без встановлення програм** (Chrome або Edge на Windows, macOS, Linux):
+
+1. Підключити ESP32 кабелем USB. Якщо в системі не з'являється COM-порт, встановити драйвер CH340
+   (чип USB на платі DevKit).
+2. Відкрити https://espressif.github.io/esptool-js/, Baudrate `460800`, **Connect**, вибрати порт.
+3. Flash Address `0x0`, файл `firmware/baro_stand_full.bin`, **Program**. Після завершення натиснути `EN` на платі.
+
+**Те саме з командного рядка** (`pip install esptool`; порт у Windows — `COM7` тощо, у Linux — `/dev/ttyUSB0`):
+
+```sh
+esptool --chip esp32 -p COM7 -b 460800 write_flash 0x0 firmware/baro_stand_full.bin
+```
+
+`baro_stand_full.bin` заповнює і область NVS, тому **стирає збережені налаштування**: IP, нулі, журналювання
+повертаються до початкових (перевірено на стенді: сесія 1, усі записи «missing», стенд за адресою
+192.168.144.36). Журнал історії не зачіпається. Щоб оновити прошивку і зберегти налаштування, записати три
+окремі файли:
+
+```sh
+esptool --chip esp32 -p COM7 -b 460800 write_flash 0x1000 firmware/bootloader.bin \
+    0x8000 firmware/partition-table.bin 0x10000 firmware/baro_stand.bin
+```
+
+Модуль UART TO ETH (B) прошивка не налаштовує: на новому стенді його треба один раз налаштувати (розділ 4).
 
 Тести ядра на ПК (з AddressSanitizer і UBSan) та емулятор стенда:
 
 ```sh
-make -C host test          # 5429 перевірок
+make -C host test          # 6375 перевірок
 make -C host emu && ./host/build/emu --port 8080   # http://127.0.0.1:8080/
 ```
 
