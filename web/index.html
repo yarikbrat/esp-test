@@ -132,7 +132,7 @@ a{color:var(--acc)}
     <form id="netForm" class="form" novalidate>
       <div><label for="fIp">IP-адреса</label><input id="fIp" name="ip" autocomplete="off" required></div>
       <div><label for="fMask">Маска</label><input id="fMask" name="mask" autocomplete="off" required></div>
-      <div><label for="fGw">Шлюз (необов'язково)</label><input id="fGw" name="gw" autocomplete="off" placeholder="порожньо, якщо роутера немає"></div>
+      <div><label for="fGw">Шлюз (необов'язково)</label><input id="fGw" name="gw" autocomplete="off" placeholder="без роутера — порожньо"></div>
       <div><button class="primary" type="submit">Зберегти та застосувати</button></div>
     </form>
     <div class="msg" id="netMsg" role="status" aria-live="polite"></div>
@@ -285,9 +285,13 @@ function renderNet(n) {
   // After BOOT the ESP32 is back on the default address while the module still answers on the old one.
   const host = location.hostname, mm = $("#netMismatch");
   mm.hidden = n.apply === "pending" || netBusy || !IP_RE.test(host) || host.startsWith("127.") || host === n.ip;
-  mm.textContent = "ESP32 налаштована на адресу " + n.ip + ", а модуль Ethernet відповідає за адресою " + host +
-    ". Так буває після утримання BOOT: відкрийте http://" + host + ":8000/, поставте Device IP " + n.ip +
-    " і натисніть Submit, потім відкрийте http://" + n.ip + "/.";
+  if (!mm.hidden && mm.dataset.key !== host + ">" + n.ip) {
+    mm.dataset.key = host + ">" + n.ip; // rebuild only on change, so a link being clicked is not replaced
+    const link = url => { const a = document.createElement("a"); a.href = a.textContent = url; a.target = "_blank"; a.rel = "noopener"; return a; };
+    mm.replaceChildren("ESP32 налаштована на адресу " + n.ip + ", а модуль Ethernet відповідає за адресою " + host +
+      ". Так буває після утримання BOOT: відкрийте ", link("http://" + host + ":8000/"), " (пароль порожній, Login), поставте Device IP " +
+      n.ip + " і натисніть Submit, потім відкрийте ", link("http://" + n.ip + "/"), ".");
+  }
   $("#netPendIp").textContent = n.pending_ip || "";
   // A new IP can only be confirmed from a page opened at that IP; same IP (mask or gateway) from any page.
   const canConfirm = n.pending_ip === n.ip || n.pending_ip === location.hostname;
