@@ -1,8 +1,9 @@
-// Bench bring-up only (not the product firmware): HTTP over the UART TO ETH bridge plus an I2C scan.
+// Bench bring-up only (not the product firmware): HTTP over the UART TO ETH bridge, I2C scan, raw sensor reads.
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/uart.h"
 #include "esp_log.h"
+#include "esp_rom_sys.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -24,7 +25,24 @@ static const char *TAG = "bringup";
 #define REQ_MAX 2048
 #define REQ_IDLE_US 2000000
 #define MAX_FOUND 8
-#define BMP58X_REG_CHIP_ID 0x01
+#define SONAR_TRIG_PIN 33
+#define SONAR_ECHO_PIN 32
+#define SONAR_TIMEOUT_US 40000
+
+// BMP58x registers and fields, as in Bosch BMP5_SensorAPI bmp5_defs.h.
+#define BMP5_REG_CHIP_ID 0x01
+#define BMP5_REG_TEMP_DATA_XLSB 0x1D
+#define BMP5_REG_INT_STATUS 0x27
+#define BMP5_REG_OSR_CONFIG 0x36
+#define BMP5_REG_ODR_CONFIG 0x37
+#define BMP5_REG_CMD 0x7E
+#define BMP5_SOFT_RESET 0xB6
+#define BMP5_PRESS_EN 0x40
+#define BMP5_OSR_P_8X (0x03 << 3)
+#define BMP5_OSR_T_1X 0x00
+#define BMP5_DEEP_DIS 0x80
+#define BMP5_ODR_10HZ (0x17 << 2)
+#define BMP5_MODE_NORMAL 0x01
 
 typedef struct {
     const char *name;
@@ -40,6 +58,8 @@ typedef struct {
     int n_found;
     uint8_t addr[MAX_FOUND];
     int chip_id[MAX_FOUND]; // -1 when not read
+    i2c_master_bus_handle_t bus;
+    i2c_master_dev_handle_t baro; // first BMP58x found on the bus, kept for reads
 } bus_report_t;
 
 static const bus_def_t BUSES[2] = {
@@ -68,8 +88,53 @@ static bool has_external_pullup(int pin)
     return high;
 }
 
+static esp_err_t bmp_write(i2c_master_dev_handle_t dev, uint8_t reg, uint8_t val)
+{
+    uint8_t b[2] = {reg, val};
+    return i2c_master_transmit(dev, b, sizeof(b), 50);
+}
+
+static esp_err_t baro_init(i2c_master_dev_handle_t dev)
+{
+    bmp_write(dev, BMP5_REG_CMD, BMP5_SOFT_RESET); // may be NACKed while the chip resets
+    vTaskDelay(pdMS_TO_TICKS(5));
+    uint8_t reg = BMP5_REG_INT_STATUS, v = 0;
+    esp_err_t err = i2c_master_transmit_receive(dev, &reg, 1, &v, 1, 50); // clears the power-on flag
+    if (err == ESP_OK) {
+        err = bmp_write(dev, BMP5_REG_ODR_CONFIG, BMP5_DEEP_DIS); // standby before changing the config
+    }
+    vTaskDelay(pdMS_TO_TICKS(3));
+    if (err == ESP_OK) {
+        err = bmp_write(dev, BMP5_REG_OSR_CONFIG, BMP5_PRESS_EN | BMP5_OSR_P_8X | BMP5_OSR_T_1X);
+    }
+    if (err == ESP_OK) {
+        err = bmp_write(dev, BMP5_REG_ODR_CONFIG, BMP5_DEEP_DIS | BMP5_ODR_10HZ | BMP5_MODE_NORMAL);
+    }
+    return err;
+}
+
+static esp_err_t baro_read(i2c_master_dev_handle_t dev, float *p_pa, float *t_c)
+{
+    uint8_t reg = BMP5_REG_TEMP_DATA_XLSB, d[6];
+    esp_err_t err = i2c_master_transmit_receive(dev, &reg, 1, d, sizeof(d), 50);
+    if (err != ESP_OK) {
+        return err;
+    }
+    int32_t t = (int32_t)(((uint32_t)d[2] << 24) | ((uint32_t)d[1] << 16) | ((uint32_t)d[0] << 8)) >> 8;
+    uint32_t p = ((uint32_t)d[5] << 16) | ((uint32_t)d[4] << 8) | d[3];
+    *t_c = (float)t / 65536.0f;
+    *p_pa = (float)p / 64.0f;
+    return ESP_OK;
+}
+
 static void scan_bus(const bus_def_t *def, bus_report_t *rep)
 {
+    if (rep->baro) {
+        i2c_master_bus_rm_device(rep->baro);
+    }
+    if (rep->bus) {
+        i2c_del_master_bus(rep->bus);
+    }
     memset(rep, 0, sizeof(*rep));
     rep->pullup_sda = has_external_pullup(def->sda);
     rep->pullup_scl = has_external_pullup(def->scl);
@@ -106,16 +171,19 @@ static void scan_bus(const bus_def_t *def, bus_report_t *rep)
         };
         i2c_master_dev_handle_t dev;
         if (i2c_master_bus_add_device(bus, &dcfg, &dev) == ESP_OK) {
-            uint8_t reg = BMP58X_REG_CHIP_ID, id = 0;
+            uint8_t reg = BMP5_REG_CHIP_ID, id = 0;
             if (i2c_master_transmit_receive(dev, &reg, 1, &id, 1, 50) == ESP_OK) {
                 rep->chip_id[idx] = id;
             }
-            i2c_master_bus_rm_device(dev);
+            bool keep = !rep->baro && (id == 0x50 || id == 0x51) && baro_init(dev) == ESP_OK;
+            if (keep) {
+                rep->baro = dev;
+            } else {
+                i2c_master_bus_rm_device(dev);
+            }
         }
     }
-    i2c_del_master_bus(bus);
-    gpio_reset_pin(def->sda);
-    gpio_reset_pin(def->scl);
+    rep->bus = bus;
 
     ESP_LOGI(TAG, "%s SDA%d/SCL%d: ext pull-up sda=%d scl=%d, found %d", def->name, def->sda, def->scl,
              rep->pullup_sda, rep->pullup_scl, rep->n_found);
@@ -129,6 +197,44 @@ static void scan_all(void)
     for (int i = 0; i < 2; i++) {
         scan_bus(&BUSES[i], &g_report[i]);
     }
+}
+
+static void sonar_init(void)
+{
+    gpio_config_t trig = {.pin_bit_mask = 1ULL << SONAR_TRIG_PIN, .mode = GPIO_MODE_OUTPUT};
+    gpio_config(&trig);
+    gpio_set_level(SONAR_TRIG_PIN, 0);
+    // Pull-down keeps an unconnected ECHO at 0 instead of floating.
+    gpio_config_t echo = {
+        .pin_bit_mask = 1ULL << SONAR_ECHO_PIN,
+        .mode = GPIO_MODE_INPUT,
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,
+    };
+    gpio_config(&echo);
+}
+
+// Echo pulse width in microseconds; -1 no echo started, -2 echo never ended, -3 echo stuck high.
+static int32_t sonar_measure_us(void)
+{
+    if (gpio_get_level(SONAR_ECHO_PIN)) {
+        return -3;
+    }
+    gpio_set_level(SONAR_TRIG_PIN, 1);
+    esp_rom_delay_us(10);
+    gpio_set_level(SONAR_TRIG_PIN, 0);
+    int64_t t0 = esp_timer_get_time();
+    while (!gpio_get_level(SONAR_ECHO_PIN)) {
+        if (esp_timer_get_time() - t0 > SONAR_TIMEOUT_US) {
+            return -1;
+        }
+    }
+    int64_t rise = esp_timer_get_time();
+    while (gpio_get_level(SONAR_ECHO_PIN)) {
+        if (esp_timer_get_time() - rise > SONAR_TIMEOUT_US) {
+            return -2;
+        }
+    }
+    return (int32_t)(esp_timer_get_time() - rise);
 }
 
 static const char *chip_name(int id)
@@ -167,6 +273,7 @@ static size_t render_page(void)
     g_page_len = 0;
     put("<!doctype html><html lang=\"uk\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<meta http-equiv=\"refresh\" content=\"2;url=/\">"
         "<link rel=\"icon\" href=\"data:,\"><title>Перевірка стенда</title>"
         "<style>body{font-family:sans-serif;margin:16px;max-width:720px}td,th{padding:4px 8px;text-align:left}"
         "table{border-collapse:collapse}tr{border-bottom:1px solid #ccc}</style></head><body>"
@@ -194,7 +301,25 @@ static size_t render_page(void)
         }
         put("</td></tr>");
     }
-    put("</table><p><a href=\"/rescan\">Пересканувати шини</a></p></body></html>");
+    put("</table><h2>Показання</h2><table>");
+    for (int b = 0; b < 2; b++) {
+        float p, t;
+        if (!g_report[b].baro) {
+            put("<tr><td>%s</td><td>датчик не ініціалізовано</td></tr>", BUSES[b].name);
+        } else if (baro_read(g_report[b].baro, &p, &t) == ESP_OK) {
+            put("<tr><td>%s</td><td>тиск %.1f Па, температура %.2f &deg;C</td></tr>", BUSES[b].name, p, t);
+        } else {
+            put("<tr><td>%s</td><td>помилка читання</td></tr>", BUSES[b].name);
+        }
+    }
+    int32_t us = sonar_measure_us();
+    if (us >= 0) {
+        put("<tr><td>HC-SR04</td><td>%.1f см (відлуння %ld мкс)</td></tr>", us / 58.3f, (long)us);
+    } else {
+        put("<tr><td>HC-SR04</td><td>%s</td></tr>",
+            us == -1 ? "немає відлуння" : us == -2 ? "відлуння задовге" : "ECHO постійно 1");
+    }
+    put("</table><p>Сторінка оновлюється кожні 2 с. <a href=\"/rescan\">Пересканувати шини</a></p></body></html>");
     return g_page_len;
 }
 
@@ -288,6 +413,7 @@ static void release_module_pins(void)
 void app_main(void)
 {
     release_module_pins();
+    sonar_init();
     scan_all();
 
     uart_config_t ucfg = {
