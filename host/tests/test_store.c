@@ -146,7 +146,10 @@ void test_histlog(void)
     CHECK_EQ_INT(histlog_append(&hl, &r), 0);
     CHECK_EQ_INT(hl.last_error, 0);
 
-    // A failed clear is counted as a write error.
+    // A failed clear is counted as a write error (the marker lands on a sector start here).
+    while (hl.next_seq % RPS != 0) {
+        append_n(&hl, 1);
+    }
     fe.fail_erase = true;
     errs = hl.write_errors;
     CHECK(histlog_clear(&hl) != 0);
@@ -159,14 +162,53 @@ void test_histlog(void)
     CHECK(histlog_append(&hl, &r) != 0);
     fe.fail_write = false;
 
-    // Clear.
+    // Clear: a marker record, at most one sector erase, survives a reboot.
+    append_n(&hl, 5);
+    uint32_t erases = 0, erases_after = 0;
+    for (uint32_t i = 0; i < 4; i++) {
+        erases += fe.erase_count[i];
+    }
+    uint32_t mark_seq = hl.next_seq;
     CHECK_EQ_INT(histlog_clear(&hl), 0);
+    for (uint32_t i = 0; i < 4; i++) {
+        erases_after += fe.erase_count[i];
+    }
+    CHECK(erases_after - erases <= 1);
     CHECK_EQ_INT(histlog_count(&hl), 0);
+    CHECK_EQ_INT(histlog_read_recent(&hl, HL_SEQ_EMPTY, out, 10, NULL), 0);
     CHECK_EQ_INT(histlog_open(&hl, &ops, 4), 0);
     CHECK_EQ_INT(histlog_count(&hl), 0);
+    CHECK_EQ_INT(hl.next_seq, mark_seq + 1);
     r = make_rec(1);
     CHECK_EQ_INT(histlog_append(&hl, &r), 0);
-    CHECK_EQ_INT(r.seq, 0);
+    CHECK_EQ_INT(r.seq, mark_seq + 1);
+    CHECK_EQ_INT(histlog_count(&hl), 1);
+    CHECK_EQ_INT(histlog_open(&hl, &ops, 4), 0);
+    CHECK_EQ_INT(histlog_count(&hl), 1);
+    n = histlog_read_recent(&hl, HL_SEQ_EMPTY, out, 10, NULL);
+    CHECK(n == 1 && out[0].seq == mark_seq + 1);
+
+    // Two clears in a row, then a full lap over the markers.
+    CHECK_EQ_INT(histlog_clear(&hl), 0);
+    CHECK_EQ_INT(histlog_clear(&hl), 0);
+    CHECK_EQ_INT(histlog_open(&hl, &ops, 4), 0);
+    CHECK_EQ_INT(histlog_count(&hl), 0);
+    append_n(&hl, 4 * RPS + 3);
+    CHECK_EQ_INT(histlog_open(&hl, &ops, 4), 0);
+    CHECK(histlog_count(&hl) > 3 * RPS && histlog_count(&hl) <= 4 * RPS); // markers fell off the ring
+    n = histlog_read_recent(&hl, HL_SEQ_EMPTY, out, 600, NULL);
+    CHECK_EQ_INT(n, histlog_count(&hl));
+    for (size_t i = 0; i < n; i++) {
+        CHECK((out[i].flags[0] & HL_F_CLEAR) == 0);
+    }
+
+    // A clear that cannot write its marker fails and keeps the records.
+    uint32_t before_fail = histlog_count(&hl);
+    fe.fail_write = true;
+    CHECK(histlog_clear(&hl) != 0);
+    fe.fail_write = false;
+    CHECK_EQ_INT(histlog_open(&hl, &ops, 4), 0);
+    CHECK_EQ_INT(histlog_count(&hl), before_fail);
 
     // Changing the ring size without clearing must not resurrect records in the wrong slots.
     append_n(&hl, 3 * RPS);

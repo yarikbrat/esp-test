@@ -17,6 +17,7 @@ extern "C" {
 // flags[ch] bits
 #define HL_F_VALID 0x01u // pressure valid
 #define HL_F_ZERO  0x02u // zero set, altitude defined
+#define HL_F_CLEAR 0x04u // flags[0] of a clear marker: this record and everything older is cleared
 #define HL_F_STATUS(f) (((f) >> 4) & 0x0Fu)
 #define HL_F_MAKE(valid, zero, status) \
     (uint8_t)(((valid) ? HL_F_VALID : 0u) | ((zero) ? HL_F_ZERO : 0u) | (((status) & 0x0Fu) << 4))
@@ -60,6 +61,7 @@ int histlog_open(histlog_t *hl, const hl_flash_t *fl, uint32_t n_sectors);
 // Appends a record; fills rec->seq and rec->crc.
 int histlog_append(histlog_t *hl, hl_record_t *rec);
 
+// Clears logically by appending a marker: no mass erase, so flash stays free for other tasks.
 int histlog_clear(histlog_t *hl);
 
 uint32_t histlog_count(const histlog_t *hl);

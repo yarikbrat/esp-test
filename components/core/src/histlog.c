@@ -40,8 +40,8 @@ int histlog_open(histlog_t *hl, const hl_flash_t *fl, uint32_t n_sectors)
     hl->recs_per_sector = fl->sector_size / REC_SIZE;
     hl->capacity = hl->recs_per_sector * n_sectors;
 
-    bool any = false;
-    uint32_t max_seq = 0, min_seq = 0;
+    bool any = false, cleared = false;
+    uint32_t max_seq = 0, min_seq = 0, clear_seq = 0;
     for (uint32_t slot = 0; slot < hl->capacity; slot++) {
         hl_record_t r;
         int err = read_slot(hl, slot, &r);
@@ -62,10 +62,17 @@ int histlog_open(histlog_t *hl, const hl_flash_t *fl, uint32_t n_sectors)
         if (!any || r.seq < min_seq) {
             min_seq = r.seq;
         }
+        if ((r.flags[0] & HL_F_CLEAR) && (!cleared || r.seq > clear_seq)) {
+            clear_seq = r.seq;
+            cleared = true;
+        }
         any = true;
     }
     hl->next_seq = any ? max_seq + 1 : 0;
     hl->oldest_seq = any ? min_seq : 0;
+    if (cleared && hl->oldest_seq <= clear_seq) {
+        hl->oldest_seq = clear_seq + 1;
+    }
     return 0;
 }
 
@@ -137,18 +144,15 @@ int histlog_append(histlog_t *hl, hl_record_t *rec)
 
 int histlog_clear(histlog_t *hl)
 {
-    for (uint32_t s = 0; s < hl->n_sectors; s++) {
-        int err = hl->fl->erase_sector(hl->fl->ctx, s * hl->fl->sector_size);
-        if (err) {
-            hl->write_errors++;
-            hl->last_error = err;
-            return err; // partly erased; the next open() rescan gives the true state
-        }
+    hl_record_t mark;
+    memset(&mark, 0, sizeof(mark));
+    mark.flags[0] = HL_F_CLEAR;
+    int err = histlog_append(hl, &mark);
+    if (err) {
+        return err;
     }
-    hl->next_seq = 0;
-    hl->oldest_seq = 0;
+    hl->oldest_seq = hl->next_seq;
     hl->corrupt = 0;
-    hl->last_error = 0;
     return 0;
 }
 
