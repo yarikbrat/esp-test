@@ -5,7 +5,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-// Register map as in Bosch BMP5_SensorAPI bmp5_defs.h.
+// Карта регістрів як у Bosch BMP5_SensorAPI bmp5_defs.h.
 #define REG_CHIP_ID     0x01
 #define REG_TEMP_XLSB   0x1D
 #define REG_INT_STATUS  0x27
@@ -45,7 +45,7 @@ bool bmp58x_bus_init(bmp58x_t *b)
         .scl_io_num = b->scl,
         .clk_source = I2C_CLK_SRC_DEFAULT,
         .glitch_ignore_cnt = 7,
-        .flags.enable_internal_pullup = true, // the sensor boards also carry their own pull-ups
+        .flags.enable_internal_pullup = true, // на платах датчиків також є власні підтяжки
     };
     esp_err_t err = i2c_new_master_bus(&cfg, &b->bus);
     if (err != ESP_OK) {
@@ -67,7 +67,7 @@ static void drop_device(bmp58x_t *b)
 static sensor_status_t sensor_init(bmp58x_t *b)
 {
     drop_device(b);
-    i2c_master_bus_reset(b->bus); // frees SDA if a sensor was cut off mid-transfer
+    i2c_master_bus_reset(b->bus); // звільняє SDA, якщо датчик відключився посеред передачі
     uint16_t addr = 0;
     for (uint16_t a = 0x47; a >= 0x46 && !addr; a--) {
         if (i2c_master_probe(b->bus, a, I2C_TIMEOUT_MS) == ESP_OK) {
@@ -97,20 +97,20 @@ static sensor_status_t sensor_init(bmp58x_t *b)
         return SS_NOT_FOUND;
     }
 
-    reg_write(b, REG_CMD, CMD_SOFT_RESET); // NACK here is normal: the chip resets mid-transfer
+    reg_write(b, REG_CMD, CMD_SOFT_RESET); // NACK тут нормальний: чип скидається посеред передачі
     vTaskDelay(pdMS_TO_TICKS(10));
-    // After a NACK the driver stays in an error state until the bus is reset.
+    // Після NACK драйвер лишається в стані помилки, доки шину не скинуто.
     esp_err_t err = ESP_FAIL;
     uint8_t v;
     for (int i = 0; i < 5 && err != ESP_OK; i++) {
         i2c_master_bus_reset(b->bus);
-        err = reg_read(b, REG_INT_STATUS, &v, 1); // clears the power-on flag
+        err = reg_read(b, REG_INT_STATUS, &v, 1); // скидає прапорець увімкнення живлення
         if (err != ESP_OK) {
             vTaskDelay(pdMS_TO_TICKS(5));
         }
     }
     if (err == ESP_OK) {
-        err = reg_write(b, REG_ODR_CONFIG, ODR_DEEP_DIS); // standby before changing the config
+        err = reg_write(b, REG_ODR_CONFIG, ODR_DEEP_DIS); // режим standby перед зміною конфігурації
     }
     vTaskDelay(pdMS_TO_TICKS(3));
     if (err == ESP_OK) {
@@ -126,7 +126,7 @@ static sensor_status_t sensor_init(bmp58x_t *b)
     b->ready = true;
     b->fail_streak = 0;
     ESP_LOGI(TAG, "%s ready at 0x%02x", b->name, addr);
-    return SS_REINIT; // first sample comes on the next poll
+    return SS_REINIT; // перше значення буде при наступному опитуванні
 }
 
 sensor_status_t bmp58x_poll(bmp58x_t *b, uint32_t now_ms, float *p_pa)

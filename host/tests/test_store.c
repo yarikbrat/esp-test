@@ -15,7 +15,7 @@ static hl_record_t make_rec(uint32_t i)
     r.session = 7;
     r.t_s = i * 10;
     r.p_pa[0] = 100000.0f + (float)i;
-    r.p_pa[1] = NAN; // second channel failed
+    r.p_pa[1] = NAN; // другий канал зі збоєм
     r.h_m[0] = 1.5f;
     r.h_m[1] = NAN;
     r.flags[0] = HL_F_MAKE(true, true, 0);
@@ -41,13 +41,13 @@ void test_histlog(void)
 
     CHECK_EQ_INT(histlog_open(&hl, &ops, 1), -1);
 
-    // Empty log.
+    // Порожній журнал.
     CHECK_EQ_INT(histlog_open(&hl, &ops, 4), 0);
     CHECK_EQ_INT(hl.capacity, 4 * RPS);
     CHECK_EQ_INT(histlog_count(&hl), 0);
     CHECK_EQ_INT(histlog_read_recent(&hl, HL_SEQ_EMPTY, out, 10, NULL), 0);
 
-    // Write, then "reboot".
+    // Запис, потім "перезавантаження".
     append_n(&hl, 200);
     CHECK_EQ_INT(histlog_count(&hl), 200);
     CHECK_EQ_INT(histlog_open(&hl, &ops, 4), 0);
@@ -63,12 +63,12 @@ void test_histlog(void)
     CHECK(isnan(out[0].p_pa[1]) && isnan(out[0].h_m[1]));
     CHECK_EQ_INT(HL_F_STATUS(out[0].flags[1]), 3);
     CHECK(!(out[0].flags[1] & HL_F_VALID));
-    n = histlog_read_recent(&hl, 2, out, 10, NULL); // page "before seq 2"
+    n = histlog_read_recent(&hl, 2, out, 10, NULL); // сторінка "до seq 2"
     CHECK_EQ_INT(n, 2);
     CHECK_EQ_INT(out[0].seq, 1);
     CHECK_EQ_INT(out[1].seq, 0);
 
-    // Three full laps over 4 sectors; guaranteed capacity is capacity - RPS.
+    // Три повні кола по 4 секторах; гарантована місткість — capacity - RPS.
     uint32_t total = 3 * 4 * RPS;
     while (hl.next_seq < total) {
         uint32_t written = hl.next_seq + 1;
@@ -77,7 +77,7 @@ void test_histlog(void)
         CHECK(histlog_count(&hl) >= (written < hl.capacity - RPS ? written : hl.capacity - RPS));
     }
     for (int s = 0; s < 4; s++) {
-        CHECK_EQ_INT(fe.erase_count[s], 3); // even wear
+        CHECK_EQ_INT(fe.erase_count[s], 3); // рівномірне зношування
     }
     uint32_t count_before = histlog_count(&hl);
     uint32_t oldest_before = hl.oldest_seq;
@@ -90,7 +90,7 @@ void test_histlog(void)
     CHECK_EQ_INT(out[0].seq, total - 1);
     CHECK_EQ_INT(out[n - 1].seq, hl.oldest_seq);
 
-    // Power cut mid-write, away from a sector start (a sector start is erased before writing).
+    // Вимкнення живлення посеред запису, не на початку сектора (початок сектора стирається перед записом).
     append_n(&hl, 5);
     uint32_t cut_seq = hl.next_seq;
     fe.cut_after_bytes = 16;
@@ -99,16 +99,16 @@ void test_histlog(void)
     CHECK_EQ_INT(hl.write_errors, 1);
     CHECK_EQ_INT(histlog_open(&hl, &ops, 4), 0);
     CHECK_EQ_INT(hl.corrupt, 1);
-    CHECK_EQ_INT(hl.next_seq, cut_seq); // the torn record does not count
+    CHECK_EQ_INT(hl.next_seq, cut_seq); // обірваний запис не враховується
     r = make_rec(10000);
-    CHECK_EQ_INT(histlog_append(&hl, &r), 0); // dirty slot is skipped
+    CHECK_EQ_INT(histlog_append(&hl, &r), 0); // брудний слот пропускається
     CHECK_EQ_INT(r.seq, cut_seq + 1);
     n = histlog_read_recent(&hl, HL_SEQ_EMPTY, out, 2, NULL);
     CHECK_EQ_INT(n, 2);
     CHECK_EQ_INT(out[0].seq, cut_seq + 1);
-    CHECK_EQ_INT(out[1].seq, cut_seq - 1); // gap skipped
+    CHECK_EQ_INT(out[1].seq, cut_seq - 1); // пропуск обійдено
 
-    // A long run of gaps (failed writes burn seqs) must not end pagination early.
+    // Довга серія пропусків (невдалі записи спалюють seq) не повинна передчасно завершити посторінкове читання.
     uint32_t before_gap = hl.next_seq - 1;
     fe.fail_write = true;
     for (int i = 0; i < 100 && hl.next_seq % RPS != 0; i++) {
@@ -119,7 +119,7 @@ void test_histlog(void)
     append_n(&hl, 1);
     uint32_t cursor = HL_SEQ_EMPTY;
     n = histlog_read_recent(&hl, HL_SEQ_EMPTY, out, 2, &cursor);
-    CHECK_EQ_INT(n, 1); // only the record after the gap fits in the walk budget
+    CHECK_EQ_INT(n, 1); // у бюджет обходу вміщується лише запис після пропуску
     CHECK(cursor != HL_SEQ_EMPTY);
     size_t pages = 0;
     while (cursor != HL_SEQ_EMPTY && pages++ < 20) {
@@ -128,11 +128,11 @@ void test_histlog(void)
             break;
         }
     }
-    CHECK(n > 0 && out[0].seq == before_gap); // older history still reachable
+    CHECK(n > 0 && out[0].seq == before_gap); // старіша історія все ще доступна
     n = histlog_read_recent(&hl, 1 + hl.oldest_seq, out, 5, &cursor);
     CHECK(n <= 1 && cursor == HL_SEQ_EMPTY);
 
-    // Erase failure: visible error, log keeps working afterwards.
+    // Збій стирання: помилку видно, журнал і далі працює.
     while (hl.next_seq % RPS != 0) {
         append_n(&hl, 1);
     }
@@ -146,7 +146,7 @@ void test_histlog(void)
     CHECK_EQ_INT(histlog_append(&hl, &r), 0);
     CHECK_EQ_INT(hl.last_error, 0);
 
-    // A failed clear is counted as a write error (the marker lands on a sector start here).
+    // Невдале очищення рахується як помилка запису (маркер тут потрапляє на початок сектора).
     while (hl.next_seq % RPS != 0) {
         append_n(&hl, 1);
     }
@@ -156,13 +156,13 @@ void test_histlog(void)
     CHECK_EQ_INT(hl.write_errors, errs + 1);
     fe.fail_erase = false;
 
-    // Write failure is reported.
+    // Про збій запису повідомляється.
     fe.fail_write = true;
     r = make_rec(0);
     CHECK(histlog_append(&hl, &r) != 0);
     fe.fail_write = false;
 
-    // Clear: a marker record, at most one sector erase, survives a reboot.
+    // Очищення: запис-маркер, щонайбільше одне стирання сектора, переживає перезавантаження.
     append_n(&hl, 5);
     uint32_t erases = 0, erases_after = 0;
     for (uint32_t i = 0; i < 4; i++) {
@@ -188,36 +188,36 @@ void test_histlog(void)
     n = histlog_read_recent(&hl, HL_SEQ_EMPTY, out, 10, NULL);
     CHECK(n == 1 && out[0].seq == mark_seq + 1);
 
-    // Damaged slots from before a clear are not reported after a reboot.
+    // Пошкоджені слоти, що були до очищення, не показуються після перезавантаження.
     {
-        uint32_t old_slot = (mark_seq - 2) % hl.capacity; // written before the clear
+        uint32_t old_slot = (mark_seq - 2) % hl.capacity; // записано до очищення
         uint8_t *p = fe.mem + old_slot * 32u;
-        CHECK(p[0] != 0xFF); // the slot really holds an old record
-        p[5] ^= 0x01;        // break its CRC
+        CHECK(p[0] != 0xFF); // у слоті справді лежить старий запис
+        p[5] ^= 0x01;        // зіпсувати його CRC
         CHECK_EQ_INT(histlog_open(&hl, &ops, 4), 0);
         CHECK_EQ_INT(hl.corrupt, 0);
-        append_n(&hl, 3); // damage inside the live log is still reported
+        append_n(&hl, 3); // пошкодження всередині живого журналу все ще показується
         uint8_t *q = fe.mem + ((hl.next_seq - 2) % hl.capacity) * 32u;
         q[5] ^= 0x01;
         CHECK_EQ_INT(histlog_open(&hl, &ops, 4), 0);
         CHECK_EQ_INT(hl.corrupt, 1);
     }
 
-    // Two clears in a row, then a full lap over the markers.
+    // Два очищення поспіль, потім повне коло поверх маркерів.
     CHECK_EQ_INT(histlog_clear(&hl), 0);
     CHECK_EQ_INT(histlog_clear(&hl), 0);
     CHECK_EQ_INT(histlog_open(&hl, &ops, 4), 0);
     CHECK_EQ_INT(histlog_count(&hl), 0);
     append_n(&hl, 4 * RPS + 3);
     CHECK_EQ_INT(histlog_open(&hl, &ops, 4), 0);
-    CHECK(histlog_count(&hl) > 3 * RPS && histlog_count(&hl) <= 4 * RPS); // markers fell off the ring
+    CHECK(histlog_count(&hl) > 3 * RPS && histlog_count(&hl) <= 4 * RPS); // маркери випали з кільця
     n = histlog_read_recent(&hl, HL_SEQ_EMPTY, out, 600, NULL);
     CHECK_EQ_INT(n, histlog_count(&hl));
     for (size_t i = 0; i < n; i++) {
         CHECK((out[i].flags[0] & HL_F_CLEAR) == 0);
     }
 
-    // A clear that cannot write its marker fails and keeps the records.
+    // Очищення, яке не може записати маркер, завершується помилкою і зберігає записи.
     uint32_t before_fail = histlog_count(&hl);
     fe.fail_write = true;
     CHECK(histlog_clear(&hl) != 0);
@@ -225,7 +225,7 @@ void test_histlog(void)
     CHECK_EQ_INT(histlog_open(&hl, &ops, 4), 0);
     CHECK_EQ_INT(histlog_count(&hl), before_fail);
 
-    // Changing the ring size without clearing must not resurrect records in the wrong slots.
+    // Зміна розміру кільця без очищення не повинна воскресити записи в чужих слотах.
     append_n(&hl, 3 * RPS);
     CHECK_EQ_INT(histlog_open(&hl, &ops, 2), 0);
     n = histlog_read_recent(&hl, HL_SEQ_EMPTY, out, 600, NULL);
@@ -233,16 +233,16 @@ void test_histlog(void)
         CHECK(out[i].seq % hl.capacity == out[i].seq % (2 * RPS));
     }
 
-    // Garbage everywhere (neither 0xFF nor valid records).
+    // Сміття всюди (ні 0xFF, ні валідних записів).
     memset(fe.mem, 0x5A, fe.size);
     CHECK_EQ_INT(histlog_open(&hl, &ops, 4), 0);
     CHECK_EQ_INT(histlog_count(&hl), 0);
     CHECK_EQ_INT(hl.corrupt, 4 * RPS);
     r = make_rec(1);
-    CHECK_EQ_INT(histlog_append(&hl, &r), 0); // slot 0 starts a sector, gets erased
+    CHECK_EQ_INT(histlog_append(&hl, &r), 0); // слот 0 на початку сектора, його стирають
     CHECK_EQ_INT(histlog_count(&hl), 1);
 
-    // Formatting garbage: every slot blank again, nothing corrupt after a reboot; a failed erase is reported.
+    // Форматування сміття: кожен слот знову порожній, після перезавантаження нічого не пошкоджено; про невдале стирання повідомляється.
     memset(fe.mem, 0x5A, fe.size);
     CHECK_EQ_INT(histlog_open(&hl, &ops, 4), 0);
     fe.fail_erase = true;
@@ -270,7 +270,7 @@ void test_settings(void)
     CHECK(memcmp(&net, &got, sizeof(net)) == 0);
     CHECK_EQ_INT(st_decode_net(NULL, 0, &got), ST_MISSING);
     CHECK(got.ip == NETCFG_DEFAULT_IP);
-    for (size_t i = 0; i < n; i++) { // any single bit flip is detected
+    for (size_t i = 0; i < n; i++) { // виявляється будь-яка зміна одного біта
         buf[i] ^= 0x01;
         CHECK_EQ_INT(st_decode_net(buf, n, &got), ST_CORRUPT);
         CHECK(got.ip == NETCFG_DEFAULT_IP);
@@ -278,11 +278,11 @@ void test_settings(void)
     }
     CHECK_EQ_INT(st_decode_net(buf, n - 1, &got), ST_CORRUPT);
     netcfg_t bad = {.ip = 0x0A000000u, .mask = 0xFF000000u, .gw = 0};
-    n = st_encode_net(&bad, buf, sizeof(buf)); // valid CRC, invalid address
+    n = st_encode_net(&bad, buf, sizeof(buf)); // валідний CRC, невалідна адреса
     CHECK_EQ_INT(st_decode_net(buf, n, &got), ST_CORRUPT);
     CHECK_EQ_INT(st_encode_net(&net, buf, 4), 0);
 
-    // Zero: channels are independent; one channel's blob never loads as the other's.
+    // Нуль: канали незалежні; blob одного каналу ніколи не завантажується як blob іншого.
     zero_cfg_t z = {.set = true, .p0_pa = 100123.5f}, zg;
     n = st_encode_zero(&z, 0, buf, sizeof(buf));
     CHECK_EQ_INT(st_decode_zero(buf, n, 0, &zg), ST_LOADED);

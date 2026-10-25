@@ -22,7 +22,7 @@ void test_stand(void)
     stand_init(&s);
     float h;
 
-    // Sonar: median of 5 rejects a single spike; stale after 500 ms; window resets after outage.
+    // Сонар: медіана з 5 відкидає одиничний викид; застаріває через 500 мс; вікно скидається після зникнення даних.
     float seq[] = {50.0f, 50.4f, 300.0f, 49.8f, 50.2f};
     for (int i = 0; i < 5; i++) {
         stand_sonar_sample(&s, SS_OK, seq[i], (uint32_t)(i * 60));
@@ -32,13 +32,13 @@ void test_stand(void)
     stand_sonar_sample(&s, SS_NO_ECHO, NAN, 800);
     CHECK_EQ_INT(s.sonar.status, SS_NO_ECHO);
     CHECK(!stand_chan_fresh(&s.sonar, STAND_SONAR_STALE_MS, 800));
-    CHECK_NEAR(s.sonar.value, 50.2, 1e-4); // last valid kept for the "stale" display
+    CHECK_NEAR(s.sonar.value, 50.2, 1e-4); // останнє валідне значення лишається для показу "застаріло"
     stand_sonar_sample(&s, SS_OK, 20.0f, 900);
-    CHECK_NEAR(s.sonar.value, 20.0, 1e-4); // old window dropped
+    CHECK_NEAR(s.sonar.value, 20.0, 1e-4); // старе вікно відкинуто
     stand_sonar_sample(&s, SS_OK, 21.0f, 960);
     CHECK_NEAR(s.sonar.value, 20.5, 1e-4);
 
-    // Zero needs fresh data.
+    // Для нуля потрібні свіжі дані.
     CHECK_EQ_INT(stand_zero_start(&s, 0, 0), STAND_ZERO_NO_DATA);
     CHECK_EQ_INT(s.baro[0].cal_view, CAL_FAILED);
     CHECK_EQ_INT(s.baro[0].cal_err, CAL_ERR_NO_DATA);
@@ -46,11 +46,11 @@ void test_stand(void)
 
     feed_baro(&s, 0, 100000.0f, 0, 500, NULL);
     feed_baro(&s, 1, 100500.0f, 0, 500, NULL);
-    CHECK(!stand_baro_altitude(&s.baro[0], 500, &h)); // fresh but no zero
+    CHECK(!stand_baro_altitude(&s.baro[0], 500, &h)); // дані свіжі, але нуля немає
 
     CHECK_EQ_INT(stand_zero_start(&s, 0, 500), STAND_ZERO_STARTED);
     CHECK_EQ_INT(stand_zero_start(&s, 0, 520), STAND_ZERO_BUSY);
-    CHECK(!stand_zero_reset(&s, 0)); // no reset during calibration
+    CHECK(!stand_zero_reset(&s, 0)); // без скидання під час калібрування
     stand_event_t ev = STAND_EV_NONE;
     feed_baro(&s, 0, 100000.0f, 550, 1600, &ev);
     feed_baro(&s, 1, 100500.0f, 550, 1600, NULL);
@@ -58,22 +58,22 @@ void test_stand(void)
     CHECK(s.baro[0].zero.set);
     CHECK_EQ_INT(s.baro[0].origin, ZO_NEW);
     CHECK_EQ_INT(s.baro[0].persist, PERSIST_PENDING);
-    CHECK(!s.baro[1].zero.set); // channels independent
+    CHECK(!s.baro[1].zero.set); // канали незалежні
     CHECK(stand_baro_altitude(&s.baro[0], 1600, &h));
     CHECK_NEAR(h, 0.0, 0.01);
     stand_zero_persisted(&s, 0, true);
     CHECK_EQ_INT(s.baro[0].persist, PERSIST_OK);
 
-    // Lift: lower pressure -> positive altitude, reached once the 1 s average window has refilled.
+    // Підйом: нижчий тиск -> додатна висота, досягається, коли вікно усереднення 1 с знову заповниться.
     feed_baro(&s, 0, 99970.0f, 1650, 1700, NULL);
     CHECK(stand_baro_altitude(&s.baro[0], 1700, &h));
-    CHECK(h > 0.1f && h < 0.4f); // 2 of 20 samples are new
+    CHECK(h > 0.1f && h < 0.4f); // 2 з 20 відліків нові
     feed_baro(&s, 0, 99970.0f, 1750, 2650, NULL);
     CHECK(stand_baro_altitude(&s.baro[0], 2650, &h));
     CHECK(h > 2.0f && h < 3.0f);
     CHECK_NEAR(s.baro[0].c.value, 99970.0, 0.01);
 
-    // Failed calibration keeps the previous p0: sensor drops out during the run.
+    // Невдале калібрування зберігає попередній p0: датчик відпадає під час вимірювання.
     float p0_before = s.baro[0].zero.p0_pa;
     CHECK_EQ_INT(stand_zero_start(&s, 0, 2650), STAND_ZERO_STARTED);
     ev = STAND_EV_NONE;
@@ -86,16 +86,16 @@ void test_stand(void)
     CHECK_EQ_INT(ev, STAND_EV_ZERO_FAILED);
     CHECK_EQ_INT(s.baro[0].cal_err, CAL_ERR_TIMEOUT);
     CHECK(s.baro[0].zero.set && s.baro[0].zero.p0_pa == p0_before);
-    CHECK(!stand_baro_altitude(&s.baro[0], 6000, &h)); // no fresh data -> no number
+    CHECK(!stand_baro_altitude(&s.baro[0], 6000, &h)); // немає свіжих даних -> немає числа
 
-    // Calibration timeout when the driver stops calling sample() entirely.
+    // Тайм-аут калібрування, коли драйвер повністю перестає викликати sample().
     feed_baro(&s, 1, 100500.0f, 5000, 5100, NULL);
     CHECK_EQ_INT(stand_zero_start(&s, 1, 5100), STAND_ZERO_STARTED);
     CHECK_EQ_INT(stand_baro_poll(&s, 1, 8000), STAND_EV_NONE);
     CHECK_EQ_INT(stand_baro_poll(&s, 1, 8101), STAND_EV_ZERO_FAILED);
     CHECK(!s.baro[1].zero.set);
 
-    // Log record: both channels from one state, failed channel flagged, never 0 for invalid.
+    // Запис журналу: обидва канали з одного стану, канал зі збоєм позначено, для невалідного ніколи не 0.
     feed_baro(&s, 1, 100500.0f, 8200, 8300, NULL);
     hl_record_t rec;
     stand_fill_record(&s, 8300, 3, 77, &rec);
@@ -106,14 +106,14 @@ void test_stand(void)
     CHECK(isnan(rec.p_pa[0]) && isnan(rec.h_m[0]));
     CHECK((rec.flags[1] & HL_F_VALID) && !(rec.flags[1] & HL_F_ZERO));
     CHECK_NEAR(rec.p_pa[1], 100500.0, 0.01);
-    CHECK(isnan(rec.h_m[1])); // altitude undefined before zero
+    CHECK(isnan(rec.h_m[1])); // висота не визначена до нуля
 
-    // A channel that silently stopped (last status OK) is logged as stale, not as OK.
+    // Канал, що тихо зупинився (останній статус OK), записується як застарілий, а не як OK.
     stand_fill_record(&s, 8300 + STAND_BARO_STALE_MS + 1, 3, 78, &rec);
     CHECK(!(rec.flags[1] & HL_F_VALID));
     CHECK_EQ_INT(HL_F_STATUS(rec.flags[1]), SS_STALE);
 
-    // Reset + restore.
+    // Скидання + відновлення.
     CHECK(stand_zero_reset(&s, 0));
     CHECK(!s.baro[0].zero.set);
     CHECK_EQ_INT(s.baro[0].origin, ZO_NONE);
@@ -122,26 +122,26 @@ void test_stand(void)
     CHECK_EQ_INT(s.baro[1].origin, ZO_RESTORED);
 }
 
-// Pressure is the mean of the last STAND_BARO_AVG_N valid samples; an outage restarts the window.
+// Тиск — це середнє останніх STAND_BARO_AVG_N валідних відліків; зникнення даних перезапускає вікно.
 void test_baro_average(void)
 {
     stand_t s;
     stand_init(&s);
     uint32_t t = 0;
     for (int i = 0; i < STAND_BARO_AVG_N; i++, t += 50) {
-        stand_baro_sample(&s, 0, SS_OK, (i % 2) ? 100002.0f : 99998.0f, t); // +-2 Pa noise
+        stand_baro_sample(&s, 0, SS_OK, (i % 2) ? 100002.0f : 99998.0f, t); // шум +-2 Па
     }
     CHECK_NEAR(s.baro[0].c.value, 100000.0, 0.01);
-    stand_baro_sample(&s, 0, SS_COMM_ERROR, NAN, t); // a failed read is not averaged
+    stand_baro_sample(&s, 0, SS_COMM_ERROR, NAN, t); // невдале читання не усереднюється
     CHECK_NEAR(s.baro[0].c.value, 100000.0, 0.01);
     for (int i = 0; i < STAND_BARO_AVG_N; i++, t += 50) {
         stand_baro_sample(&s, 0, SS_OK, 100100.0f, t);
     }
-    CHECK_NEAR(s.baro[0].c.value, 100100.0, 0.01); // old samples fully replaced
-    t += STAND_BARO_STALE_MS + 50; // outage longer than the stale limit
+    CHECK_NEAR(s.baro[0].c.value, 100100.0, 0.01); // старі відліки повністю замінено
+    t += STAND_BARO_STALE_MS + 50; // зникнення даних довше за ліміт застарілості
     stand_baro_sample(&s, 0, SS_OK, 99000.0f, t);
-    CHECK_NEAR(s.baro[0].c.value, 99000.0, 0.01); // window restarted, no pre-outage mix
-    CHECK_NEAR(s.baro[1].c.value, 0.0, 0.01); // other channel untouched
+    CHECK_NEAR(s.baro[0].c.value, 99000.0, 0.01); // вікно перезапущено, без домішки даних до зникнення
+    CHECK_NEAR(s.baro[1].c.value, 0.0, 0.01); // інший канал не зачеплено
 }
 
 void test_jsonw(void)
@@ -168,7 +168,7 @@ void test_jsonw(void)
     CHECK(w.overflow && strcmp(buf, "1234567") == 0);
 }
 
-// Fake backend recording calls.
+// Фальшивий бекенд, що записує виклики.
 typedef struct {
     api_snapshot_t snap;
     stand_zero_start_t zero_ret;
@@ -177,9 +177,9 @@ typedef struct {
     int prepare_calls;
     bool pending, log_busy;
     netcfg_t pending_cfg;
-    char host[HTTP_MAX_HOST + 1]; // Host header of the next call
-    char rid[HTTP_MAX_RID + 1];   // X-Req-Id of the next call
-    char client[HTTP_MAX_RID + 1]; // X-Client-Id of the next call
+    char host[HTTP_MAX_HOST + 1]; // заголовок Host наступного виклику
+    char rid[HTTP_MAX_RID + 1];   // X-Req-Id наступного виклику
+    char client[HTTP_MAX_RID + 1]; // X-Client-Id наступного виклику
     char out[16384];
     size_t out_len;
 } fake_t;
@@ -307,7 +307,7 @@ void test_api(void)
     CHECK(has(f, "405"));
     call(f, HTTP_POST, "/api/state", NULL, NULL, false);
     CHECK(has(f, "405"));
-    // HEAD error replies carry Content-Length but no body, or the shared stream desyncs.
+    // Відповіді HEAD з помилкою мають Content-Length, але без тіла, інакше спільний потік розсинхронізується.
     call(f, HTTP_HEAD, "/api/zero", NULL, NULL, false);
     CHECK(has(f, "405") && has(f, "Content-Length: ") && strstr(f->out, "\r\n\r\n")[4] == '\0');
     call(f, HTTP_HEAD, "/nope", NULL, NULL, false);
@@ -315,7 +315,7 @@ void test_api(void)
     call(f, HTTP_POST, "/index.html", NULL, NULL, false);
     CHECK(has(f, "405") && has(f, "\"ok\":false"));
 
-    // State before any data: no numbers, Ukrainian statuses, altitude null.
+    // Стан до будь-яких даних: без чисел, українські статуси, altitude null.
     call(f, HTTP_GET, "/api/state", NULL, NULL, false);
     CHECK(has(f, "\"name\":\"BMP585\"") && has(f, "\"name\":\"BMP581\""));
     CHECK(has(f, "\"hpa\":null") && has(f, "\"alt_m\":null") && has(f, "\"cm\":null"));
@@ -323,7 +323,7 @@ void test_api(void)
     CHECK(has(f, "\"ip\":\"192.168.144.36\"") && has(f, "\"gw\":null"));
     CHECK(!has(f, "\"hpa\":0.00"));
 
-    // State with data, zero and a failed channel.
+    // Стан з даними, нулем і каналом зі збоєм.
     stand_t *s = &f->snap.st;
     for (uint32_t t = 9000; t <= 10000; t += 50) {
         stand_baro_sample(s, 0, SS_OK, 101325.0f, t);
@@ -333,10 +333,10 @@ void test_api(void)
     stand_baro_sample(s, 1, SS_NOT_FOUND, NAN, 10000);
     call(f, HTTP_GET, "/api/state", NULL, NULL, false);
     CHECK(has(f, "\"hpa\":1013.25") && has(f, "\"p0_hpa\":1014.00"));
-    CHECK(has(f, "\"alt_m\":6.24")); // p < p0 -> positive
+    CHECK(has(f, "\"alt_m\":6.24")); // p < p0 -> додатне
     CHECK(has(f, "Нуль відновлено з пам'яті") && has(f, "Датчик не відповідає"));
 
-    // Zero.
+    // Нуль.
     f->zero_ret = STAND_ZERO_STARTED;
     call(f, HTTP_POST, "/api/zero", NULL, "ch=1", false);
     CHECK(has(f, "200 OK") && f->zero_calls == 1);
@@ -353,7 +353,7 @@ void test_api(void)
     call(f, HTTP_POST, "/api/zero/reset", NULL, "ch=0", false);
     CHECK(has(f, "200 OK") && f->reset_calls == 1);
 
-    // Log settings.
+    // Налаштування журналу.
     call(f, HTTP_POST, "/api/log/config", NULL, "enabled=1&interval=5", false);
     CHECK(has(f, "200 OK") && f->last_cfg.enabled && f->last_cfg.interval_s == 5);
     call(f, HTTP_POST, "/api/log/config", NULL, "enabled=1&interval=0", false);
@@ -369,12 +369,12 @@ void test_api(void)
     CHECK(has(f, "\"next_before\":1") && has(f, "\"alt_m\":null"));
     call(f, HTTP_GET, "/api/log", "before=1&limit=20", NULL, false);
     CHECK(has(f, "\"seq\":0") && has(f, "\"next_before\":null") && has(f, "\"oldest\":0"));
-    f->log_busy = true; // a busy log is an error, never an empty page
+    f->log_busy = true; // зайнятий журнал — це помилка, а ніколи не порожня сторінка
     call(f, HTTP_GET, "/api/log", NULL, NULL, false);
     CHECK(has(f, "409") && has(f, "\"busy\"") && !has(f, "\"records\""));
     f->log_busy = false;
 
-    // Request id is echoed so the page can spot replies meant for another tab; never left over.
+    // Id запиту повертається назад, щоб сторінка могла впізнати відповіді для іншої вкладки; ніколи не лишається від попереднього.
     strcpy(f->rid, "17");
     call(f, HTTP_GET, "/api/state", NULL, NULL, false);
     CHECK(has(f, "X-Req-Id: 17\r\n"));
@@ -383,7 +383,7 @@ void test_api(void)
     f->rid[0] = '\0';
     call(f, HTTP_GET, "/api/state", NULL, NULL, false);
     CHECK(!has(f, "X-Req-Id"));
-    // Parser errors echo the id too, so the page can tell its own error from another client's.
+    // Помилки парсера теж повертають id, щоб сторінка відрізнила свою помилку від чужої.
     {
         api_out_t eo = {.ctx = f, .write = f_write};
         char sc[512];
@@ -395,7 +395,7 @@ void test_api(void)
         CHECK(has(f, "400") && !has(f, "X-Req-Id"));
     }
 
-    // Open pages are counted by X-Client-Id within a 3 s window; requests without an id are not counted.
+    // Відкриті сторінки рахуються за X-Client-Id у вікні 3 с; запити без id не рахуються.
     f->snap.now_ms = 100000;
     strcpy(f->client, "pageA");
     call(f, HTTP_GET, "/api/state", NULL, NULL, false);
@@ -404,7 +404,7 @@ void test_api(void)
     f->snap.now_ms = 101000;
     call(f, HTTP_GET, "/api/state", NULL, NULL, false);
     CHECK(has(f, "\"clients\":2,"));
-    f->snap.now_ms = 103500; // pageA silent for 3.5 s, pageB polls
+    f->snap.now_ms = 103500; // pageA мовчить 3.5 с, pageB опитує
     call(f, HTTP_GET, "/api/state", NULL, NULL, false);
     CHECK(has(f, "\"clients\":1,"));
     const char *many[] = {"p1", "p2", "p3", "p4", "p5"};
@@ -412,31 +412,31 @@ void test_api(void)
         strcpy(f->client, many[i]);
         call(f, HTTP_GET, "/api/state", NULL, NULL, false);
     }
-    CHECK(has(f, "\"clients\":4,")); // table is full, still more than one
+    CHECK(has(f, "\"clients\":4,")); // таблиця повна, все одно більше одного
     f->client[0] = '\0';
     f->snap.now_ms = 200000;
     call(f, HTTP_GET, "/api/state", NULL, NULL, false);
     CHECK(has(f, "\"clients\":0,"));
 
-    // Network: invalid input never prepares a change.
+    // Мережа: невалідні дані ніколи не готують зміну.
     strcpy(f->host, "192.168.144.36");
     api_after_t a = call(f, HTTP_POST, "/api/net", NULL, "ip=192.168.144.0&mask=255.255.255.0&gw=", false);
     CHECK(has(f, "422") && has(f, "ip_host_part") && !a.net_apply && f->prepare_calls == 0);
     a = call(f, HTTP_POST, "/api/net", NULL, "ip=10.1.1.1", false);
     CHECK(has(f, "400") && !a.net_apply && f->prepare_calls == 0);
-    // Valid input: pending only, plus the form the page must send to the module.
+    // Валідні дані: лише очікування, плюс форма, яку сторінка має надіслати модулю.
     a = call(f, HTTP_POST, "/api/net", NULL, "ip=192.168.144.50&mask=255.255.255.0&gw=192.168.144.1", false);
     CHECK(has(f, "200 OK") && has(f, "\"url\":\"http://192.168.144.50/\"") && !a.net_apply);
     CHECK(f->prepare_calls == 1 && f->pending_cfg.ip == 0xC0A89032u && f->pending_cfg.gw == 0xC0A89001u);
     CHECK(has(f, "\"module_url\":\"http://192.168.144.36:8000/\"") && has(f, "\"same_ip\":false"));
     CHECK(has(f, "lca=192.168.144.50&lcp=80&wbp=8000") && has(f, "lcm=255.255.255.0&lcg=192.168.144.1"));
     CHECK(has(f, "bdr=B&dtb=0&prt=0&stb=0&flc=0&ndr=0") && has(f, "post=Submit"));
-    // Only an explicit commit that arrived at the new address applies it; ordinary requests never do.
+    // Застосовує зміну лише явний commit, що прийшов на нову адресу; звичайні запити — ніколи.
     a = call(f, HTTP_GET, "/api/state", NULL, NULL, false);
     CHECK(!a.net_apply);
     strcpy(f->host, "192.168.144.50");
     a = call(f, HTTP_GET, "/api/state", NULL, NULL, false);
-    CHECK(!a.net_apply); // a poll at the new address is not a commit
+    CHECK(!a.net_apply); // опитування на новій адресі — не commit
     strcpy(f->host, "192.168.144.36");
     a = call(f, HTTP_POST, "/api/net/commit", NULL, NULL, false);
     CHECK(!a.net_apply && has(f, "409") && has(f, "wrong_host"));
@@ -448,26 +448,26 @@ void test_api(void)
     CHECK(!a.net_apply && has(f, "405"));
     a = call(f, HTTP_POST, "/api/net/commit", NULL, NULL, false);
     CHECK(a.net_apply && a.net.ip == 0xC0A89032u && a.net.gw == 0xC0A89001u && has(f, "200 OK"));
-    // A second change prepared at the pending address does not commit the first one.
+    // Друга зміна, підготовлена на новій адресі, не підтверджує першу.
     a = call(f, HTTP_POST, "/api/net", NULL, "ip=192.168.144.51&mask=255.255.255.0&gw=", false);
     CHECK(!a.net_apply && f->pending_cfg.ip == 0xC0A89033u);
     f->pending = false;
     a = call(f, HTTP_POST, "/api/net/commit", NULL, NULL, false);
     CHECK(!a.net_apply && has(f, "no_pending"));
-    // Mask or gateway only (pending IP == active IP): the address proves nothing, any host may commit.
-    f->snap.net.ip = 0xC0A89024u; // active 192.168.144.36
+    // Лише маска або шлюз (IP в очікуванні == активний IP): адреса нічого не доводить, commit може будь-який хост.
+    f->snap.net.ip = 0xC0A89024u; // активна 192.168.144.36
     strcpy(f->host, "stand.local");
     a = call(f, HTTP_POST, "/api/net", NULL, "ip=192.168.144.36&mask=255.255.255.128&gw=", false);
     CHECK(!a.net_apply && f->pending && has(f, "\"same_ip\":true"));
     a = call(f, HTTP_POST, "/api/net/commit", NULL, NULL, false);
     CHECK(a.net_apply && a.net.mask == 0xFFFFFF80u);
-    // Cancel drops a pending change; with nothing pending it reports that.
+    // Скасування відкидає зміну в очікуванні; якщо нічого не очікує, так і повідомляє.
     f->pending = true;
     a = call(f, HTTP_POST, "/api/net/cancel", NULL, NULL, false);
     CHECK(!a.net_apply && has(f, "200 OK") && !f->pending);
     a = call(f, HTTP_POST, "/api/net/cancel", NULL, NULL, false);
     CHECK(has(f, "409") && has(f, "no_pending"));
-    // Without a usable Host the module URL falls back to the active address from the snapshot.
+    // Без придатного Host URL модуля береться з активної адреси зі знімка стану.
     f->pending = false;
     f->host[0] = '\0';
     f->snap.net.ip = 0x0A000005u;

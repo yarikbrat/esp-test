@@ -30,11 +30,11 @@ void app_load_settings(void)
     uint8_t buf[64];
     size_t n = kv_get("net", buf, sizeof(buf));
     g_app.net_origin = st_decode_net(n ? buf : NULL, n, &g_app.net);
-    // Settings sent to the module but not yet confirmed at the new address survive a reboot.
+    // Налаштування, надіслані модулю, але ще не підтверджені на новій адресі, зберігаються після перезавантаження.
     n = kv_get("netp", buf, sizeof(buf));
     if (n && st_decode_net(buf, n, &g_app.net_pending) == ST_LOADED) {
         if (memcmp(&g_app.net_pending, &g_app.net, sizeof(netcfg_t)) == 0) {
-            kv_erase("netp"); // power was cut after "net" was saved but before "netp" was erased
+            kv_erase("netp"); // живлення зникло після запису "net", але до стирання "netp"
         } else {
             g_app.net_apply = NET_APPLY_PENDING;
             ESP_LOGI(TAG, "net: change pending, waiting for a commit at the new address");
@@ -51,7 +51,7 @@ void app_load_settings(void)
         stand_load_zero(&g_app.stand, ch, &z, o);
         ESP_LOGI(TAG, "zero%d: %s%s", ch, origin_text(o), z.set ? ", set" : "");
     }
-    // Boot counter, used as the session id in history records.
+    // Лічильник завантажень, використовується як id сесії в записах журналу.
     uint16_t boot = 0;
     if (kv_get("boot", buf, sizeof(buf)) == 2) {
         boot = (uint16_t)(buf[0] | (buf[1] << 8));
@@ -74,8 +74,8 @@ void app_request_zero_persist(int ch)
     }
 }
 
-// The only writer of zero blobs. It stores the channel's RAM value at write time, so a later reset
-// can never be overwritten by an older calibration result.
+// Єдине місце, що записує blob-и нулів. Воно зберігає значення каналу з RAM на момент запису, тож пізніше скидання
+// ніколи не буде перезаписане старішим результатом калібрування.
 void task_storage(void *arg)
 {
     (void)arg;
@@ -108,7 +108,7 @@ void app_refresh_log_stats(void)
     app_unlock();
 }
 
-// --- Web API backend --------------------------------------------------------------------------
+// --- Бекенд веб-API --------------------------------------------------------------------------
 
 static void be_snapshot(void *ctx, api_snapshot_t *o)
 {
@@ -136,7 +136,7 @@ static void be_snapshot(void *ctx, api_snapshot_t *o)
     o->net_pending = g_app.net_pending;
     o->net_apply_msg = g_app.net_apply_msg;
     o->http_port = HTTP_PORT;
-    o->link_known = false; // LINK/LINK2 are not wired
+    o->link_known = false; // LINK/LINK2 не під'єднані
     o->http = g_app.http;
     o->platform = "esp32";
     app_unlock();
@@ -201,7 +201,7 @@ static int be_log_read(void *ctx, uint32_t before, hl_record_t *out, size_t max,
     app_lock();
     bool busy = g_app.log_clearing || g_app.log_clear_req;
     app_unlock();
-    // A sector erase holds log_lock for tens of ms; do not stall the bridge longer than that.
+    // Стирання сектора тримає log_lock десятки ms; не затримувати міст довше за це.
     if (busy || xSemaphoreTake(g_app.log_lock, pdMS_TO_TICKS(200)) != pdTRUE) {
         return -1;
     }
@@ -228,7 +228,7 @@ static void be_net_prepare(void *ctx, const netcfg_t *cfg)
              saved ? "" : " (not saved, lost on reboot)");
 }
 
-// Also clears a change left behind by a failed save, so it cannot come back after a reboot.
+// Також прибирає зміну, що лишилася після невдалого збереження, щоб вона не повернулася після перезавантаження.
 static bool be_net_cancel(void *ctx)
 {
     (void)ctx;
@@ -278,10 +278,10 @@ api_backend_t app_backend(void)
     };
 }
 
-// --- Network settings ---------------------------------------------------------------------------
+// --- Мережеві налаштування ---------------------------------------------------------------------------
 
-// The address lives in the UART TO ETH module; the page moves the module (docs/uart-to-eth-b.md). This runs
-// on POST /api/net/commit at the new address (or BOOT) and stores the settings as the active ones.
+// Адреса зберігається в модулі UART TO ETH; переносить модуль сама сторінка (docs/uart-to-eth-b.md). Це виконується
+// на POST /api/net/commit за новою адресою (або після BOOT) і зберігає налаштування як активні.
 void app_net_apply(const netcfg_t *cfg)
 {
     char ip[16];
@@ -290,10 +290,10 @@ void app_net_apply(const netcfg_t *cfg)
     size_t n = st_encode_net(cfg, buf, sizeof(buf));
     bool ok = n && kv_set("net", buf, n);
     if (ok) {
-        kv_erase("netp"); // keep the pending record if "net" could not be saved
+        kv_erase("netp"); // лишити запис в очікуванні, якщо "net" не вдалося зберегти
     }
     app_lock();
-    g_app.net = *cfg; // the module already answers at this address, saved or not
+    g_app.net = *cfg; // модуль уже відповідає за цією адресою, збережено чи ні
     if (ok) {
         g_app.net_origin = ST_LOADED;
         g_app.net_apply = NET_APPLY_OK;

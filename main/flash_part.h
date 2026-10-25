@@ -1,8 +1,8 @@
 #pragma once
-// hl_flash_t backend over the "histlog" data partition.
+// бекенд hl_flash_t поверх розділу даних "histlog".
 #include <stdint.h>
 
 #include "histlog.h"
 
-// Fills *ops and returns the number of 4 KB sectors, 0 if the partition is missing.
+// Заповнює *ops і повертає кількість секторів по 4 KB, 0 якщо розділу немає.
 uint32_t flash_part_open(hl_flash_t *ops);

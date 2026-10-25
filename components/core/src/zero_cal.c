@@ -30,7 +30,7 @@ zero_cal_result_t zero_cal_poll(zero_cal_t *zc, uint32_t now_ms)
     if (zc->state != ZERO_CAL_RUNNING) {
         return ZERO_CAL_NONE;
     }
-    // Unsigned difference stays correct across ms counter wraparound.
+    // Беззнакова різниця лишається правильною при переповненні лічильника мс.
     if (now_ms - zc->start_ms > ZERO_CAL_MAX_MS) {
         zc->state = ZERO_CAL_IDLE;
         return ZERO_CAL_ERR_TIMEOUT;

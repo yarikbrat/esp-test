@@ -1,7 +1,7 @@
 #pragma once
-// NVS blob format for settings. Each group is a separate blob with magic, version and CRC32,
-// so missing, truncated or damaged entries fall back to defaults. One blob per barometer keeps
-// writing one channel's zero from touching the other.
+// Формат NVS-блобів для налаштувань. Кожна група — окремий блоб із magic, версією і CRC32,
+// тож відсутні, обрізані чи пошкоджені записи замінюються типовими. Окремий блоб на барометр не дає
+// запису нуля одного каналу зачепити інший.
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -17,9 +17,9 @@ extern "C" {
 #define LOG_INTERVAL_DEFAULT_S 10
 
 typedef enum {
-    ST_LOADED = 0, // read and verified
-    ST_MISSING,    // no entry, defaults used
-    ST_CORRUPT,    // magic/version/CRC/range check failed, defaults used
+    ST_LOADED = 0, // прочитано і перевірено
+    ST_MISSING,    // запису немає, взято типові
+    ST_CORRUPT,    // перевірка magic/версії/CRC/діапазону не пройшла, взято типові
 } st_origin_t;
 
 typedef struct {
@@ -40,7 +40,7 @@ size_t st_encode_net(const netcfg_t *in, uint8_t *buf, size_t cap);
 size_t st_encode_zero(const zero_cfg_t *in, uint8_t ch, uint8_t *buf, size_t cap);
 size_t st_encode_log(const log_cfg_t *in, uint8_t *buf, size_t cap);
 
-// buf == NULL or len == 0 means "no entry". *out is always filled.
+// buf == NULL або len == 0 означає "запису немає". *out заповнюється завжди.
 st_origin_t st_decode_net(const uint8_t *buf, size_t len, netcfg_t *out);
 st_origin_t st_decode_zero(const uint8_t *buf, size_t len, uint8_t ch, zero_cfg_t *out);
 st_origin_t st_decode_log(const uint8_t *buf, size_t len, log_cfg_t *out);

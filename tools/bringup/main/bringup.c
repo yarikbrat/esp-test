@@ -1,4 +1,4 @@
-// Bench bring-up only (not the product firmware): HTTP over the UART TO ETH bridge, I2C scan, raw sensor reads.
+// Лише для першого запуску стенда (не робоча прошивка): HTTP через міст UART TO ETH, сканування I2C, сирі показання датчиків.
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/uart.h"
@@ -29,7 +29,7 @@ static const char *TAG = "bringup";
 #define SONAR_ECHO_PIN 32
 #define SONAR_TIMEOUT_US 40000
 
-// BMP58x registers and fields, as in Bosch BMP5_SensorAPI bmp5_defs.h.
+// Регістри й поля BMP58x, як у Bosch BMP5_SensorAPI bmp5_defs.h.
 #define BMP5_REG_CHIP_ID 0x01
 #define BMP5_REG_TEMP_DATA_XLSB 0x1D
 #define BMP5_REG_INT_STATUS 0x27
@@ -57,9 +57,9 @@ typedef struct {
     bool bus_ok;
     int n_found;
     uint8_t addr[MAX_FOUND];
-    int chip_id[MAX_FOUND]; // -1 when not read
+    int chip_id[MAX_FOUND]; // -1, якщо не прочитано
     i2c_master_bus_handle_t bus;
-    i2c_master_dev_handle_t baro; // first BMP58x found on the bus, kept for reads
+    i2c_master_dev_handle_t baro; // перший знайдений на шині BMP58x, зберігається для читання
 } bus_report_t;
 
 static const bus_def_t BUSES[2] = {
@@ -72,7 +72,7 @@ static uint32_t g_requests;
 static char g_page[3072];
 static char g_head[256];
 
-// With only the internal pull-down on, the line reads high only if something external pulls it up.
+// Коли увімкнена лише внутрішня підтяжка до землі, лінія читається як високий рівень, тільки якщо її підтягує щось зовнішнє.
 static bool has_external_pullup(int pin)
 {
     gpio_config_t io = {
@@ -96,20 +96,20 @@ static esp_err_t bmp_write(i2c_master_dev_handle_t dev, uint8_t reg, uint8_t val
 
 static esp_err_t baro_init(i2c_master_bus_handle_t bus, i2c_master_dev_handle_t dev)
 {
-    bmp_write(dev, BMP5_REG_CMD, BMP5_SOFT_RESET); // may be NACKed while the chip resets
+    bmp_write(dev, BMP5_REG_CMD, BMP5_SOFT_RESET); // може отримати NACK, поки чип скидається
     vTaskDelay(pdMS_TO_TICKS(10));
-    // A NACK leaves the driver in an error state; reset the bus and retry until the chip answers again.
+    // Після NACK драйвер у стані помилки; скидаємо шину й повторюємо, доки чип знову не відповість.
     uint8_t reg = BMP5_REG_INT_STATUS, v = 0;
     esp_err_t err = ESP_FAIL;
     for (int i = 0; i < 5 && err != ESP_OK; i++) {
         i2c_master_bus_reset(bus);
-        err = i2c_master_transmit_receive(dev, &reg, 1, &v, 1, 50); // clears the power-on flag
+        err = i2c_master_transmit_receive(dev, &reg, 1, &v, 1, 50); // скидає прапорець увімкнення живлення
         if (err != ESP_OK) {
             vTaskDelay(pdMS_TO_TICKS(5));
         }
     }
     if (err == ESP_OK) {
-        err = bmp_write(dev, BMP5_REG_ODR_CONFIG, BMP5_DEEP_DIS); // standby before changing the config
+        err = bmp_write(dev, BMP5_REG_ODR_CONFIG, BMP5_DEEP_DIS); // режим standby перед зміною конфігурації
     }
     vTaskDelay(pdMS_TO_TICKS(3));
     if (err == ESP_OK) {
@@ -217,7 +217,7 @@ static void sonar_init(void)
     gpio_config_t trig = {.pin_bit_mask = 1ULL << SONAR_TRIG_PIN, .mode = GPIO_MODE_OUTPUT};
     gpio_config(&trig);
     gpio_set_level(SONAR_TRIG_PIN, 0);
-    // Pull-down keeps an unconnected ECHO at 0 instead of floating.
+    // Підтяжка до землі тримає непід'єднаний ECHO на 0, а не в плаваючому стані.
     gpio_config_t echo = {
         .pin_bit_mask = 1ULL << SONAR_ECHO_PIN,
         .mode = GPIO_MODE_INPUT,
@@ -226,7 +226,7 @@ static void sonar_init(void)
     gpio_config(&echo);
 }
 
-// Echo pulse width in microseconds; -1 no echo started, -2 echo never ended, -3 echo stuck high.
+// Тривалість імпульсу ECHO в мікросекундах; -1 відлуння не почалося, -2 відлуння не закінчилося, -3 ECHO застряг у високому рівні.
 static int32_t sonar_measure_us(void)
 {
     if (gpio_get_level(SONAR_ECHO_PIN)) {
@@ -263,7 +263,7 @@ static const char *chip_name(int id)
 
 static size_t g_page_len;
 
-// Appends to g_page; output past the end is cut off instead of overflowing.
+// Дописує в g_page; те, що не вміщається, обрізається, а не переповнює буфер.
 static void put(const char *fmt, ...)
 {
     if (g_page_len >= sizeof(g_page) - 1) {
@@ -348,7 +348,7 @@ static void send_response(int status, const char *reason, const char *body, size
     }
 }
 
-// Only GET/HEAD are expected here; request bodies are not supported by this test tool.
+// Тут очікуються лише GET/HEAD; тіла запитів цей тестовий інструмент не підтримує.
 static void handle_request(const char *req)
 {
     char method[8] = "", path[64] = "";
@@ -411,7 +411,7 @@ static void bridge_task(void *arg)
     }
 }
 
-// RST and DEF of the module are active low: keep them as inputs with a weak pull-up, i.e. released.
+// RST і DEF модуля активні низьким рівнем: тримаємо їх входами зі слабкою підтяжкою, тобто відпущеними.
 static void release_module_pins(void)
 {
     gpio_config_t io = {

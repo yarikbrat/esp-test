@@ -1,5 +1,5 @@
-// BOOT button: held for BUTTON_HOLD_MS restores the default network settings (192.168.144.36/24).
-// The same low-priority task logs a memory report every HEALTH_PERIOD_MS.
+// Кнопка BOOT: утримання BUTTON_HOLD_MS відновлює мережеві налаштування за замовчуванням (192.168.144.36/24).
+// Ця ж низькопріоритетна задача кожні HEALTH_PERIOD_MS пише в лог звіт про пам'ять.
 #include <stdio.h>
 
 #include "app.h"
@@ -14,7 +14,7 @@
 
 static const char *TAG = "button";
 
-// Free heap now and its all-time minimum, plus the unused stack of every task (bytes).
+// Вільна heap зараз і її мінімум за весь час, а також невикористаний стек кожної задачі (байти).
 static void log_health(void)
 {
     char line[160];
@@ -54,7 +54,7 @@ void task_button(void *arg)
         }
         held_ms += BUTTON_POLL_MS;
         if (!fired && held_ms >= BUTTON_HOLD_MS) {
-            fired = true; // once per press
+            fired = true; // один раз на натискання
             ESP_LOGW(TAG, "BOOT held %u ms: restoring default network settings", (unsigned)held_ms);
             app_net_reset_default();
         }

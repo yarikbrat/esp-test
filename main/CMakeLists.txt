@@ -5,7 +5,7 @@ idf_component_register(SRCS "main.c" "app.c" "kv.c" "flash_part.c" "bmp58x.c" "s
                                 esp_driver_gpio esp_timer
                        EMBED_FILES "../web/index.html")
 
-# Gzipped copy of the page, served when the browser accepts gzip (fewer bytes over the UART).
+# Стиснута gzip копія сторінки; віддається, коли браузер приймає gzip (менше байтів через UART).
 set(PAGE_SRC ${COMPONENT_DIR}/../web/index.html)
 set(PAGE_GZ ${CMAKE_CURRENT_BINARY_DIR}/index.html.gz)
 add_custom_command(OUTPUT ${PAGE_GZ}

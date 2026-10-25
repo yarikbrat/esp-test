@@ -5,11 +5,11 @@
 #include <string.h>
 
 enum {
-    ST_IDLE = 0,  // between requests, skipping CR/LF
-    ST_HEAD,      // collecting request line and headers
-    ST_BODY,      // reading Content-Length bytes
-    ST_SKIP_HEAD, // after an error: drop bytes up to the end of headers
-    ST_SKIP_BODY, // after an error: drop a body of known length
+    ST_IDLE = 0,  // між запитами, пропускаємо CR/LF
+    ST_HEAD,      // збираємо рядок запиту і заголовки
+    ST_BODY,      // читаємо Content-Length байтів
+    ST_SKIP_HEAD, // після помилки: відкидаємо байти до кінця заголовків
+    ST_SKIP_BODY, // після помилки: відкидаємо тіло відомої довжини
 };
 
 void http_parser_init(http_parser_t *p)
@@ -61,9 +61,9 @@ static bool contains_token_ci(const char *s, size_t len, const char *tok)
     return false;
 }
 
-// Header pass. Sets p->body_need as soon as Content-Length is seen, so a body can still be
-// skipped when a later header line or the request line turns out to be invalid.
-// Short alphanumeric ids only: X-Req-Id is echoed into a response header, so nothing else may pass.
+// Прохід по заголовках. Ставить p->body_need, щойно трапився Content-Length, щоб тіло можна було
+// пропустити, навіть якщо пізніший заголовок чи рядок запиту виявиться хибним.
+// Лише короткі літерно-цифрові id: X-Req-Id повторюється в заголовку відповіді, тож інше не пропускаємо.
 static void copy_token(char *dst, const char *val, size_t vlen)
 {
     bool clean = vlen > 0 && vlen <= HTTP_MAX_RID;
@@ -119,23 +119,23 @@ static int parse_headers(http_parser_t *p, char *line, char *end)
                 v = v * 10 + (size_t)(val[i] - '0');
             }
             if (have_len && v != p->body_need) {
-                p->body_need = 0; // conflicting lengths: no length is trustworthy
+                p->body_need = 0; // суперечливі довжини: жодній не можна вірити
                 return 400;
             }
             have_len = true;
             p->body_need = v;
         } else if (name_is(line, nlen, "Transfer-Encoding")) {
-            return 501; // chunked request bodies are not supported
+            return 501; // chunked-тіла запитів не підтримуються
         } else if (name_is(line, nlen, "Accept-Encoding")) {
             p->req.accept_gzip = contains_token_ci(val, vlen, "gzip");
         } else if (name_is(line, nlen, "X-Req-Id")) {
             copy_token(p->req.rid, val, vlen);
         } else if (name_is(line, nlen, "X-Client-Id")) {
             copy_token(p->req.client, val, vlen);
-        } else if (name_is(line, nlen, "Host") && !p->req.host[0]) { // the first Host header wins
-            char *colon2 = memchr(val, ':', vlen); // drop ":port"
+        } else if (name_is(line, nlen, "Host") && !p->req.host[0]) { // діє перший заголовок Host
+            char *colon2 = memchr(val, ':', vlen); // відкидаємо ":port"
             size_t hlen = colon2 ? (size_t)(colon2 - val) : vlen;
-            if (hlen <= HTTP_MAX_HOST && !(vlen > 0 && val[0] == '[')) { // IPv6 literals: the module has none
+            if (hlen <= HTTP_MAX_HOST && !(vlen > 0 && val[0] == '[')) { // літерали IPv6: у модуля їх немає
                 memcpy(p->req.host, val, hlen);
                 p->req.host[hlen] = '\0';
             }
@@ -147,7 +147,7 @@ static int parse_headers(http_parser_t *p, char *line, char *end)
 
 static int parse_request_line(http_request_t *r, char *h, size_t line_len)
 {
-    int pending = 0; // unknown method is reported after the rest of the line is checked
+    int pending = 0; // про невідомий метод повідомляємо після перевірки решти рядка
     char *sp1 = memchr(h, ' ', line_len);
     if (!sp1) {
         return 400;
@@ -189,8 +189,8 @@ static int parse_request_line(http_request_t *r, char *h, size_t line_len)
     return pending;
 }
 
-// Parses the collected head. Returns 0 or an HTTP error status; p->body_need is the body length
-// whenever it could be determined, even on error.
+// Розбирає зібрану голову. Повертає 0 або HTTP-статус помилки; p->body_need — довжина тіла,
+// якщо її вдалося визначити, навіть при помилці.
 static size_t find(const char *h, size_t n, size_t from, const char *tok)
 {
     size_t tl = strlen(tok);
@@ -202,8 +202,8 @@ static size_t find(const char *h, size_t n, size_t from, const char *tok)
     return n;
 }
 
-// Line noise that happens to contain A-Z bytes (or a newline) ends up glued in front of a real request.
-// Find the earliest "GET /", "HEAD /" or "POST /" that starts a complete request line and drop what precedes it.
+// Шум на лінії з байтами A-Z (чи переводом рядка) приклеюється перед справжнім запитом.
+// Шукаємо найраніший "GET /", "HEAD /" чи "POST /", що починає повний рядок запиту, і відкидаємо все перед ним.
 static void strip_noise(http_parser_t *p)
 {
     static const char *const tokens[] = {"GET /", "HEAD /", "POST /"};
@@ -255,7 +255,7 @@ static int parse_head(http_parser_t *p)
     return 0;
 }
 
-// Keeps the start of a request that is about to be thrown away, so the caller can log what arrived.
+// Зберігає початок запиту, який зараз буде викинуто, щоб викликач міг записати в лог, що прийшло.
 static void note_drop(http_parser_t *p)
 {
     p->drop_len = p->head_len < HTTP_DROP_SNIPPET ? p->head_len : HTTP_DROP_SNIPPET;
@@ -285,8 +285,8 @@ size_t http_parser_feed(http_parser_t *p, const uint8_t *data, size_t len, uint3
                 i++;
                 break;
             }
-            // A request starts with an upper-case method. Anything else between requests is line noise,
-            // e.g. the 32 binary bytes UART TO ETH (B) writes to the UART after applying new settings.
+            // Запит починається з методу великими літерами. Усе інше між запитами — шум на лінії,
+            // напр. 32 двійкові байти, які UART TO ETH (B) пише в UART після застосування нових налаштувань.
             if (c < 'A' || c > 'Z') {
                 p->stats.skipped_bytes++;
                 i++;
@@ -300,13 +300,13 @@ size_t http_parser_feed(http_parser_t *p, const uint8_t *data, size_t len, uint3
             if (p->head_len >= sizeof(p->head)) {
                 p->state = ST_SKIP_HEAD;
                 p->start_ms = now_ms;
-                // Seed with the buffered tail: the terminator may straddle the overflow point.
+                // Починаємо з хвоста буфера: термінатор може перетинати точку переповнення.
                 p->tail = ((uint32_t)(uint8_t)p->head[p->head_len - 3] << 16) |
                           ((uint32_t)(uint8_t)p->head[p->head_len - 2] << 8) |
                           (uint8_t)p->head[p->head_len - 1];
-                // A noisy prefix may hide the method: any HEAD request line in the buffer means no body.
+                // Шумний префікс може сховати метод: будь-який рядок запиту HEAD у буфері означає без тіла.
                 p->error_head = find(p->head, p->head_len, 0, "HEAD /") < p->head_len;
-                p->req.rid[0] = '\0'; // headers were never parsed: do not echo the previous request's id
+                p->req.rid[0] = '\0'; // заголовки не розбиралися: не повторюємо id попереднього запиту
                 note_drop(p);
                 fail(p, 431, ev);
                 return i;
@@ -317,9 +317,9 @@ size_t http_parser_feed(http_parser_t *p, const uint8_t *data, size_t len, uint3
                 strip_noise(p);
                 int status = parse_head(p);
                 if (status != 0) {
-                    // Skip a body of known, modest length so it is not parsed as the next request.
-                    // A huge claimed length is not honoured: skipping it would swallow other
-                    // clients' requests on the merged stream until the total timeout.
+                    // Пропускаємо тіло відомої помірної довжини, щоб його не розібрали як наступний запит.
+                    // Величезну заявлену довжину не враховуємо: її пропуск поглинув би запити
+                    // інших клієнтів у спільному потоці до загального тайм-ауту.
                     size_t skip = p->body_need;
                     p->error_head = p->head_len >= 5 && memcmp(p->head, "HEAD ", 5) == 0;
                     note_drop(p);
@@ -392,9 +392,9 @@ bool http_parser_tick(http_parser_t *p, uint32_t now_ms)
     if (now_ms - p->last_ms > HTTP_IDLE_TIMEOUT_MS || now_ms - p->start_ms > HTTP_TOTAL_TIMEOUT_MS) {
         p->stats.timeouts++;
         if (p->state == ST_HEAD || p->state == ST_BODY) {
-            note_drop(p); // the head is still in the buffer
+            note_drop(p); // голова ще в буфері
         } else {
-            p->drop_len = 0; // timed out while skipping: the rejected request was already reported
+            p->drop_len = 0; // тайм-аут під час пропуску: про відхилений запит уже повідомлено
         }
         http_parser_reset(p);
         return true;
@@ -426,7 +426,7 @@ const char *http_status_text(int status)
 size_t http_format_head(char *buf, size_t cap, int status, const char *content_type,
                         size_t content_length, const char *extra)
 {
-    // Content-Length is mandatory: the ESP32 cannot close the TCP connection to mark the end.
+    // Content-Length обов'язковий: ESP32 не може закрити TCP-з'єднання, щоб позначити кінець.
     int n = snprintf(buf, cap,
                      "HTTP/1.1 %d %s\r\n"
                      "Content-Type: %s\r\n"

@@ -1,13 +1,13 @@
 #pragma once
-// Settings form of the Waveshare UART TO ETH (B) web configurator (firmware V1.452).
-// See docs/uart-to-eth-b.md for the field list and the port rule.
+// Форма налаштувань веб-конфігуратора Waveshare UART TO ETH (B) (прошивка V1.452).
+// Список полів і правило портів див. у docs/uart-to-eth-b.md.
 #include <stddef.h>
 
 #include "netcfg.h"
 
-#define UART_ETH_DATA_PORT 80   // TCP server port, carries HTTP to the ESP32
-#define UART_ETH_WEB_PORT  8000 // the module's own configurator, moved off port 80
+#define UART_ETH_DATA_PORT 80   // порт TCP-сервера, несе HTTP до ESP32
+#define UART_ETH_WEB_PORT  8000 // власний конфігуратор модуля, перенесений з порту 80
 
-// Full urlencoded body for POST /ok.html: the given address, TCP Server on UART_ETH_DATA_PORT, configurator
-// on UART_ETH_WEB_PORT, 115200 8N1, no flow control, no-data restart off. Returns length, 0 if it does not fit.
+// Повне urlencoded-тіло для POST /ok.html: задана адреса, TCP Server на UART_ETH_DATA_PORT, конфігуратор
+// на UART_ETH_WEB_PORT, 115200 8N1, без керування потоком, рестарт без даних вимкнено. Повертає довжину, 0 якщо не вміщається.
 size_t uart_eth_form(const netcfg_t *cfg, char *buf, size_t cap);

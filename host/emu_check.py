@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# Raw-socket checks against the bench emulator (or the real bench): partial requests, junk,
-# stalled requests, two clients on the merged stream, and log interval timing.
+# Перевірки через сирий сокет проти емулятора стенда (або справжнього стенда): неповні запити, сміття,
+# завислі запити, два клієнти в спільному потоці та інтервали журналу.
 import argparse
 import json
 import socket
@@ -23,7 +23,7 @@ def connect(host, port):
 
 
 def read_response(s, timeout=5.0):
-    # Reads one response framed by Content-Length (the bridge never closes the connection).
+    # Читає одну відповідь, межі якої задає Content-Length (міст ніколи не закриває з'єднання).
     s.settimeout(timeout)
     buf = b""
     while b"\r\n\r\n" not in buf:
@@ -71,7 +71,7 @@ def main():
     s.sendall(b"\x00\xffgarbage\r\n\r\nGET /api/state HTTP/1.1\r\n\r\n")
     st1, _, _, rest = read_response(s)
     check(st1 == 400, "junk before a request gets 400")
-    # The 200 may already be in the leftover buffer.
+    # Відповідь 200 може вже лежати в залишку буфера.
     s.settimeout(5)
     while b"\r\n\r\n" not in rest:
         rest += s.recv(4096)
@@ -80,13 +80,13 @@ def main():
 
     s = connect(H, P)
     s.sendall(b"GET /api/sta")
-    time.sleep(2.6)  # longer than HTTP_IDLE_TIMEOUT_MS
+    time.sleep(2.6)  # довше за HTTP_IDLE_TIMEOUT_MS
     s.sendall(b"GET /api/state HTTP/1.1\r\n\r\n")
     try:
         st, _, _, _ = read_response(s, timeout=6)
     except Exception as e:
         st = str(e)
-    # After the timeout the stale prefix is dropped, so the full request parses on its own.
+    # Після тайм-ауту застарілий початок відкидається, тож повний запит розбирається сам по собі.
     check(st == 200, "stalled request dropped by timeout, next one served")
     s.close()
 

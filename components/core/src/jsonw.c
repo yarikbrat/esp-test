@@ -66,7 +66,7 @@ void jw_str(jw_t *w, const char *s)
             snprintf(e, sizeof(e), "\\u%04x", c);
             put(w, e, 6);
         } else {
-            put(w, (const char *)&c, 1); // UTF-8 passes through unchanged
+            put(w, (const char *)&c, 1); // UTF-8 проходить без змін
         }
     }
     put(w, "\"", 1);

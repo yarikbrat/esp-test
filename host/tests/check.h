@@ -1,5 +1,5 @@
 #pragma once
-// Minimal dependency-free test harness.
+// Мінімальна тестова обв'язка без залежностей.
 #include <math.h>
 #include <stdio.h>
 

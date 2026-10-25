@@ -1,5 +1,5 @@
 #pragma once
-// BMP581/BMP585 over I2C, one sensor per bus. Normal mode, 25 Hz, pressure x8, temperature x1.
+// BMP581/BMP585 по I2C, один датчик на шину. Режим normal, 25 Hz, тиск x8, температура x1.
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -23,5 +23,5 @@ typedef struct {
 } bmp58x_t;
 
 bool bmp58x_bus_init(bmp58x_t *b);
-// Reads one pressure sample, (re)initialising the sensor when needed. *p_pa is set only on SS_OK.
+// Читає одне значення тиску, за потреби (пере)ініціалізує датчик. *p_pa записується лише при SS_OK.
 sensor_status_t bmp58x_poll(bmp58x_t *b, uint32_t now_ms, float *p_pa);

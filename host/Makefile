@@ -1,4 +1,4 @@
-# Host build: unit tests for the portable core.
+# Збірка на ПК: юніт-тести для переносного ядра.
 CORE := ../components/core
 CFLAGS := -std=c11 -Wall -Wextra -Werror -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer \
           -I$(CORE)/include -Icommon
@@ -16,7 +16,7 @@ $(OUT)/tests: $(SRCS) $(wildcard $(CORE)/include/*.h) $(wildcard tests/*.h) comm
 clean:
 	rm -rf $(OUT)
 
-# Bench emulator: real core + simulated sensors behind an emulated UART-to-Ethernet bridge.
+# Емулятор стенда: справжнє ядро + імітовані датчики за емульованим мостом UART-to-Ethernet.
 EMU_SRCS := $(wildcard $(CORE)/src/*.c) common/flash_emu.c emu/emu.c
 EMU_CFLAGS := -std=c11 -Wall -Wextra -Werror -g -O1 -I$(CORE)/include -Icommon -pthread
 

@@ -1,7 +1,7 @@
 #pragma once
-// Shared state of the firmware tasks and the web API backend.
-// g_app.lock guards app_t except the histlog, which has log_lock (a sector erase takes tens of ms).
-// Lock order: log_lock, then lock. Never wait for log_lock while holding lock.
+// Спільний стан задач прошивки та бекенду веб-API.
+// g_app.lock захищає app_t, крім histlog, який має свій log_lock (стирання сектора триває десятки ms).
+// Порядок блокувань: спершу log_lock, потім lock. Ніколи не чекати на log_lock, утримуючи lock.
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -25,13 +25,13 @@ typedef struct {
     bool log_cfg_changed;
     bool log_clear_req;
     bool log_clearing;
-    // Copy of the histlog counters, refreshed by the logger task after every flash operation.
+    // Копія лічильників histlog; задача журналу оновлює її після кожної операції з flash.
     uint32_t log_count, log_capacity, log_recs_per_sector, log_sectors;
     uint32_t log_write_errors, log_corrupt;
     int log_last_error;
 
     netcfg_t net;
-    netcfg_t net_pending; // valid while net_apply == NET_APPLY_PENDING
+    netcfg_t net_pending; // дійсне, поки net_apply == NET_APPLY_PENDING
     st_origin_t net_origin;
     net_apply_t net_apply;
     const char *net_apply_msg;
@@ -42,9 +42,9 @@ typedef struct {
     histlog_t log;
     hl_flash_t flash_ops;
 
-    QueueHandle_t persist_q; // channel numbers whose zero must be written to NVS
+    QueueHandle_t persist_q; // номери каналів, чий нуль треба записати в NVS
     TaskHandle_t logger_task;
-    TaskHandle_t tasks[5]; // for the periodic stack report
+    TaskHandle_t tasks[5]; // для періодичного звіту про стек
 } app_t;
 
 extern app_t g_app;
@@ -56,7 +56,7 @@ static inline void app_unlock(void) { xSemaphoreGive(g_app.lock); }
 
 void app_load_settings(void);
 void app_request_zero_persist(int ch);
-void app_refresh_log_stats(void); // caller holds log_lock
+void app_refresh_log_stats(void); // викликати, утримуючи log_lock
 api_backend_t app_backend(void);
 void app_net_apply(const netcfg_t *cfg);
 void app_net_reset_default(void);

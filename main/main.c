@@ -7,14 +7,14 @@
 
 static const char *TAG = "main";
 
-// Task priorities: the bridge answers the browser, sensors keep the 20 Hz cadence, flash work waits.
+// Пріоритети задач: міст відповідає браузеру, датчики тримають ритм 20 Hz, робота з flash чекає.
 #define PRIO_BRIDGE  6
 #define PRIO_SENSORS 5
 #define PRIO_STORAGE 4
 #define PRIO_LOGGER  3
 #define PRIO_BUTTON  2
 
-// RST and DEF of the module are active low: keep them released (input with pull-up) unless driven.
+// RST і DEF модуля активні низьким рівнем: тримати їх відпущеними (вхід із підтяжкою), поки ми ними не керуємо.
 static void release_module_pins(void)
 {
     gpio_config_t io = {
@@ -34,14 +34,14 @@ static void open_log(void)
     }
     ESP_LOGI(TAG, "history: %u of %u records (corrupt %u)", (unsigned)histlog_count(&g_app.log),
              (unsigned)g_app.log.capacity, (unsigned)g_app.log.corrupt);
-    // Not one valid record and no erased slot: the partition was never formatted. No task runs yet,
-    // so the long erase stalls nothing.
+    // Жодного дійсного запису й жодного стертого слота: розділ ніколи не форматували. Задачі ще не запущені,
+    // тож довге стирання нічого не гальмує.
     if (g_app.log.capacity && histlog_count(&g_app.log) == 0 && g_app.log.corrupt == g_app.log.capacity) {
         ESP_LOGW(TAG, "history partition holds no log data, formatting it");
         if (histlog_format(&g_app.log) != 0) {
             int err = g_app.log.last_error;
             ESP_LOGE(TAG, "format failed (%d), rescanning", err);
-            histlog_open(&g_app.log, &g_app.flash_ops, sectors); // the true state of a partly erased partition
+            histlog_open(&g_app.log, &g_app.flash_ops, sectors); // реальний стан частково стертого розділу
             g_app.log.write_errors++;
             g_app.log.last_error = err;
         }

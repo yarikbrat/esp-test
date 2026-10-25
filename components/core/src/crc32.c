@@ -1,6 +1,6 @@
 #include "crc32.h"
 
-// Bitwise, no table: records are short and a 1 KB table is not worth the RAM.
+// Побітово, без таблиці: записи короткі, і таблиця 1 KB не варта RAM.
 uint32_t crc32_calc(const void *data, size_t len)
 {
     const uint8_t *p = data;

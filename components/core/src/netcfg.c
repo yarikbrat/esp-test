@@ -56,7 +56,7 @@ void netcfg_format_ipv4(uint32_t a, char *buf, size_t len)
 static bool mask_contiguous(uint32_t mask)
 {
     uint32_t inv = ~mask;
-    return (inv & (inv + 1)) == 0; // inverted contiguous mask + 1 is a power of two
+    return (inv & (inv + 1)) == 0; // інвертована суцільна маска + 1 є степенем двійки
 }
 
 static int mask_prefix(uint32_t mask)

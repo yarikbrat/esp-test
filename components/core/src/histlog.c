@@ -74,7 +74,7 @@ int histlog_open(histlog_t *hl, const hl_flash_t *fl, uint32_t n_sectors)
         hl->oldest_seq = clear_seq + 1;
     }
     if (cleared && hl->corrupt) {
-        // Damaged slots left from before a clear are not part of the log any more: count only live ones.
+        // Пошкоджені слоти, що лишилися до очищення, вже не належать журналу: рахуємо лише живі.
         uint32_t count = histlog_count(hl), first = hl->oldest_seq % hl->capacity;
         hl->corrupt = 0;
         for (uint32_t slot = 0; slot < hl->capacity; slot++) {
@@ -97,7 +97,7 @@ uint32_t histlog_count(const histlog_t *hl)
 
 int histlog_append(histlog_t *hl, hl_record_t *rec)
 {
-    // A slot may hold leftovers of an interrupted write: skip it (a seq gap), within one sector.
+    // Слот може містити залишки перерваного запису: пропускаємо його (пропуск seq), у межах одного сектора.
     for (uint32_t attempt = 0; attempt < hl->recs_per_sector; attempt++) {
         uint32_t seq = hl->next_seq;
         uint32_t slot = seq % hl->capacity;
@@ -111,7 +111,7 @@ int histlog_append(histlog_t *hl, hl_record_t *rec)
                 hl->last_error = err;
                 return err;
             }
-            // Erased seq - capacity .. seq - capacity + rps - 1.
+            // Стерто seq - capacity .. seq - capacity + rps - 1.
             if (seq + hl->recs_per_sector > hl->capacity) {
                 uint32_t survived = seq + hl->recs_per_sector - hl->capacity;
                 if (hl->oldest_seq < survived) {
@@ -123,7 +123,7 @@ int histlog_append(histlog_t *hl, hl_record_t *rec)
             err = read_slot(hl, slot, &cur);
             if (err || !rec_blank(&cur)) {
                 if (hl->oldest_seq == hl->next_seq) {
-                    hl->oldest_seq++; // keep an empty log empty
+                    hl->oldest_seq++; // порожній журнал лишається порожнім
                 }
                 hl->next_seq++;
                 hl->write_errors += err ? 1 : 0;
@@ -141,7 +141,7 @@ int histlog_append(histlog_t *hl, hl_record_t *rec)
             err = read_slot(hl, slot, &back);
         }
         if (!err && memcmp(&back, rec, REC_SIZE) != 0) {
-            err = -2; // read-back mismatch
+            err = -2; // зворотне читання не збіглося
         }
         if (err) {
             hl->write_errors++;
@@ -163,7 +163,7 @@ int histlog_format(histlog_t *hl)
         if (err) {
             hl->write_errors++;
             hl->last_error = err;
-            return err; // partly erased; the next open() rescan gives the true state
+            return err; // стерто частково; повторне сканування в наступному open() дасть справжній стан
         }
     }
     hl->next_seq = 0;
@@ -173,8 +173,8 @@ int histlog_format(histlog_t *hl)
     return 0;
 }
 
-// If the marker lands on a sector start, that sector (the oldest records) is erased before the marker is
-// written; a failed write then reports an error although those records are already gone.
+// Якщо маркер потрапляє на початок сектора, цей сектор (найстаріші записи) стирається до запису
+// маркера; невдалий запис тоді повідомляє помилку, хоча ці записи вже зникли.
 int histlog_clear(histlog_t *hl)
 {
     hl_record_t mark;
@@ -194,7 +194,7 @@ size_t histlog_read_recent(histlog_t *hl, uint32_t before_seq, hl_record_t *out,
 {
     size_t n = 0;
     uint32_t seq = before_seq < hl->next_seq ? before_seq : hl->next_seq;
-    uint32_t budget = (uint32_t)max * 4u + 8u; // gaps are rare; bound the walk
+    uint32_t budget = (uint32_t)max * 4u + 8u; // пропуски рідкісні; обмежуємо обхід
     while (n < max && seq > hl->oldest_seq && budget--) {
         seq--;
         uint32_t slot = seq % hl->capacity;

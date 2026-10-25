@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds the firmware and copies ready-to-flash images into firmware/.
+# Збирає прошивку й копіює готові до прошивання образи в firmware/.
 set -e
 cd "$(dirname "$0")/.."
 idf.py build

@@ -1,6 +1,6 @@
 #pragma once
-// NOR flash emulator for host tests and the bench emulator: erase sets 0xFF, write only clears bits.
-// Supports power-cut and failure injection.
+// Емулятор NOR flash для тестів на ПК та емулятора стенда: стирання ставить 0xFF, запис лише скидає біти.
+// Підтримує імітацію вимкнення живлення та збоїв.
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -10,11 +10,11 @@ typedef struct {
     uint8_t *mem;
     uint32_t size;
     uint32_t sector_size;
-    uint32_t erase_count[256]; // erases per sector
-    int cut_after_bytes;       // >= 0: next write stores only this many bytes and fails
+    uint32_t erase_count[256]; // стирань на кожен сектор
+    int cut_after_bytes;       // >= 0: наступний запис збереже лише стільки байтів і завершиться помилкою
     bool fail_erase;
     bool fail_write;
-    const char *backing_file;  // if set, every change is written through to this file
+    const char *backing_file;  // якщо задано, кожна зміна одразу записується в цей файл
     int fd;
 } flash_emu_t;
 

@@ -5,7 +5,7 @@
 
 #include <string.h>
 
-// Layout: [magic u16][version u8][arg u8][payload...][crc32 u32], little-endian.
+// Структура: [magic u16][version u8][arg u8][payload...][crc32 u32], little-endian.
 #define MAGIC_NET  0x454Eu // "NE"
 #define MAGIC_ZERO 0x305Au // "Z0"
 #define MAGIC_LOG  0x474Cu // "LG"
@@ -88,7 +88,7 @@ st_origin_t st_decode_zero(const uint8_t *buf, size_t len, uint8_t ch, zero_cfg_
     if (!buf || len == 0) {
         return ST_MISSING;
     }
-    // The channel number is part of the header, so one channel's blob never loads as the other's.
+    // Номер каналу входить у заголовок, тож блоб одного каналу ніколи не завантажиться як блоб іншого.
     if (!check(buf, len, ST_ZERO_BLOB_SIZE, MAGIC_ZERO, ch) || buf[4] > 1) {
         return ST_CORRUPT;
     }

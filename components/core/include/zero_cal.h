@@ -1,7 +1,7 @@
 #pragma once
-// "Set zero" procedure for one barometer channel. Owned by the sensor task, not thread-safe.
-// Succeeds once >= ZERO_CAL_MIN_MS elapsed and >= ZERO_CAL_MIN_SAMPLES valid samples arrived;
-// fails if that has not happened by ZERO_CAL_MAX_MS. Time is passed in (monotonic ms).
+// Процедура "задати нуль" для одного каналу барометра. Належить задачі датчиків, не потокобезпечна.
+// Успішна, коли минуло >= ZERO_CAL_MIN_MS і надійшло >= ZERO_CAL_MIN_SAMPLES дійсних вимірів;
+// невдала, якщо цього не сталося до ZERO_CAL_MAX_MS. Час передається ззовні (монотонні мс).
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -19,9 +19,9 @@ typedef enum {
 } zero_cal_state_t;
 
 typedef enum {
-    ZERO_CAL_NONE = 0,    // still running or not started
-    ZERO_CAL_DONE,        // p0 computed
-    ZERO_CAL_ERR_TIMEOUT, // not enough valid samples within ZERO_CAL_MAX_MS
+    ZERO_CAL_NONE = 0,    // ще триває або не почата
+    ZERO_CAL_DONE,        // p0 обчислено
+    ZERO_CAL_ERR_TIMEOUT, // замало дійсних вимірів за ZERO_CAL_MAX_MS
 } zero_cal_result_t;
 
 typedef struct {
@@ -34,16 +34,16 @@ typedef struct {
 
 void zero_cal_init(zero_cal_t *zc);
 
-// Returns false if already running: a repeated click must not start a parallel run.
+// Повертає false, якщо вже триває: повторний клік не має запускати паралельний прогін.
 bool zero_cal_start(zero_cal_t *zc, uint32_t now_ms);
 
 bool zero_cal_running(const zero_cal_t *zc);
 
-// Feeds one sample; on ZERO_CAL_DONE writes the mean to *p0_out and max-min to *spread_out.
+// Подає один вимір; при ZERO_CAL_DONE пише середнє в *p0_out і max-min в *spread_out.
 zero_cal_result_t zero_cal_feed(zero_cal_t *zc, bool valid, float p_pa, uint32_t now_ms,
                                 float *p0_out, float *spread_out);
 
-// Timeout check for when the sensor stopped answering and feed() is not called.
+// Перевірка тайм-ауту, коли датчик перестав відповідати і feed() не викликається.
 zero_cal_result_t zero_cal_poll(zero_cal_t *zc, uint32_t now_ms);
 
 #ifdef __cplusplus

@@ -1,6 +1,6 @@
-// Bench emulator: runs the real core (parser, api, stand, histlog, settings codec) on Linux.
-// Threads mirror the firmware tasks; the TCP side mimics UART TO ETH (B) in transparent mode:
-// all client connections are merged into one byte stream and the reply goes to every client.
+// Емулятор стенда: запускає справжнє ядро (парсер, api, stand, histlog, кодек налаштувань) на Linux.
+// Потоки відповідають задачам прошивки; бік TCP імітує UART TO ETH (B) у прозорому режимі:
+// усі клієнтські з'єднання зливаються в один потік байтів, а відповідь іде кожному клієнту.
 #define _GNU_SOURCE
 #include "api.h"
 #include "flash_emu.h"
@@ -22,13 +22,13 @@
 #include <time.h>
 #include <unistd.h>
 
-#define MAX_CLIENTS   30 // same limit as the module's TCP server
+#define MAX_CLIENTS   30 // той самий ліміт, що й у TCP-сервера модуля
 #define LOG_SECTORS   64
 #define SECTOR_SIZE   4096
 
 typedef struct {
     int port;
-    int baud; // 0 = unthrottled
+    int baud; // 0 = без обмеження швидкості
     bool broadcast;
     const char *data_dir;
     const char *page_path;
@@ -39,10 +39,10 @@ static opts_t g_opt = {.port = 8080, .baud = 115200, .broadcast = true, .data_di
                        .page_path = "web/index.html", .log_sectors = LOG_SECTORS};
 
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_mutex_t g_persist_lock = PTHREAD_MUTEX_INITIALIZER; // orders zero writes; taken before g_lock
+static pthread_mutex_t g_persist_lock = PTHREAD_MUTEX_INITIALIZER; // впорядковує записи нуля; береться до g_lock
 static pthread_cond_t g_log_cond = PTHREAD_COND_INITIALIZER;
 
-// Everything below is guarded by g_lock.
+// Усе нижче захищено g_lock.
 static stand_t g_stand;
 static histlog_t g_log;
 static log_cfg_t g_log_cfg;
@@ -58,7 +58,7 @@ static uint16_t g_session;
 static http_stats_t g_http_stats;
 static int g_nclients;
 
-// Simulation knobs, also under g_lock.
+// Параметри симуляції, теж під g_lock.
 static bool g_fail[3]; // baro0, baro1, sonar
 static float g_lift_m;
 static float g_noise_pa = 2.0f;
@@ -83,7 +83,7 @@ static void sleep_ms(unsigned ms)
     nanosleep(&ts, NULL);
 }
 
-// --- NVS stand-in: one file per key -----------------------------------------------------------
+// --- Заміна NVS: один файл на ключ -----------------------------------------------------------
 
 static void kv_path(const char *key, char *buf, size_t cap)
 {
@@ -114,13 +114,13 @@ static bool kv_set(const char *key, const uint8_t *buf, size_t len)
     }
     bool ok = fwrite(buf, 1, len, f) == len;
     ok = fclose(f) == 0 && ok;
-    return ok && rename(tmp, path) == 0; // atomic like an NVS commit
+    return ok && rename(tmp, path) == 0; // атомарно, як commit у NVS
 }
 
 static const char *zero_key(int ch) { return ch ? "zero1" : "zero0"; }
 
-// Writes the channel's current RAM zero. Reading it under g_persist_lock means a late writer always
-// stores the newest value, so a reset can never be overwritten by an older calibration result.
+// Записує поточний нуль каналу з RAM. Читання під g_persist_lock гарантує, що пізній записувач завжди
+// збереже найновіше значення, тож скидання ніколи не перезапише старіший результат калібрування.
 static bool persist_zero(int ch)
 {
     pthread_mutex_lock(&g_persist_lock);
@@ -137,7 +137,7 @@ static bool persist_zero(int ch)
     return ok;
 }
 
-// --- Sensor task --------------------------------------------------------------------------------
+// --- Задача датчиків --------------------------------------------------------------------------------
 
 static float gauss(void)
 {
@@ -155,7 +155,7 @@ static void *sensor_task(void *arg)
         stand_event_t ev[STAND_BARO_N];
         float p0[STAND_BARO_N];
         for (int ch = 0; ch < STAND_BARO_N; ch++) {
-            // ~12 Pa per metre near sea level; slow common drift imitates weather.
+            // ~12 Па на метр біля рівня моря; повільний спільний дрейф імітує погоду.
             float p = 101325.0f + (ch ? 15.0f : 0.0f) - 12.0f * g_lift_m +
                       3.0f * sinf((float)t / 600000.0f) + g_noise_pa * gauss();
             ev[ch] = g_fail[ch] ? stand_baro_sample(&g_stand, ch, SS_NOT_FOUND, NAN, t)
@@ -166,7 +166,7 @@ static void *sensor_task(void *arg)
             next_sonar = t + 60;
             float cm = g_distance_cm + 0.3f * gauss();
             if (rand() % 50 == 0) {
-                cm += 40.0f; // occasional echo spike, removed by the median
+                cm += 40.0f; // випадковий викид луни, його прибирає медіана
             }
             if (g_fail[2]) {
                 stand_sonar_sample(&g_stand, SS_NO_ECHO, NAN, t);
@@ -176,7 +176,7 @@ static void *sensor_task(void *arg)
         }
         pthread_mutex_unlock(&g_lock);
 
-        // Persist outside the lock, like the firmware's storage task.
+        // Збереження поза блокуванням, як у задачі зберігання прошивки.
         for (int ch = 0; ch < STAND_BARO_N; ch++) {
             if (ev[ch] == STAND_EV_ZERO_DONE) {
                 bool ok = persist_zero(ch);
@@ -185,12 +185,12 @@ static void *sensor_task(void *arg)
                 printf("[baro%d] zero failed, previous kept\n", ch);
             }
         }
-        sleep_ms(50); // 20 Hz
+        sleep_ms(50); // 20 Гц
     }
     return NULL;
 }
 
-// --- Logger task --------------------------------------------------------------------------------
+// --- Задача журналу --------------------------------------------------------------------------------
 
 static void *logger_task(void *arg)
 {
@@ -202,14 +202,14 @@ static void *logger_task(void *arg)
             g_log_clear_req = false;
             g_log_clearing = true;
             pthread_mutex_unlock(&g_lock);
-            sleep_ms(500); // the real erase of 64 sectors takes seconds
+            sleep_ms(500); // справжнє стирання 64 секторів триває секунди
             pthread_mutex_lock(&g_lock);
             int err = histlog_clear(&g_log);
             g_log_clearing = false;
             if (err) {
                 printf("[log] clear FAILED (%d), rescanning\n", err);
-                uint32_t errors = g_log.write_errors; // open() resets counters; keep the history
-                histlog_open(&g_log, &g_flash_ops, g_log.n_sectors); // true state after a partial erase
+                uint32_t errors = g_log.write_errors; // open() скидає лічильники; зберегти історію
+                histlog_open(&g_log, &g_flash_ops, g_log.n_sectors); // справжній стан після часткового стирання
                 g_log.write_errors = errors;
                 g_log.last_error = err;
             } else {
@@ -227,7 +227,7 @@ static void *logger_task(void *arg)
                     printf("[log] write error %d\n", g_log.last_error);
                 }
             }
-            // Schedule from the previous deadline so intervals do not drift.
+            // Планувати від попереднього дедлайну, щоб інтервали не дрейфували.
             next += (uint64_t)g_log_cfg.interval_s * 1000u;
             if (next <= t) {
                 next = t + (uint64_t)g_log_cfg.interval_s * 1000u;
@@ -246,13 +246,13 @@ static void *logger_task(void *arg)
         uint16_t iv = g_log_cfg.interval_s;
         pthread_cond_timedwait(&g_log_cond, &g_lock, &ts);
         if (g_log_cfg.interval_s != iv) {
-            next = mono_ms() + (uint64_t)g_log_cfg.interval_s * 1000u; // new interval starts now
+            next = mono_ms() + (uint64_t)g_log_cfg.interval_s * 1000u; // новий інтервал починається зараз
         }
     }
     return NULL;
 }
 
-// --- API backend --------------------------------------------------------------------------------
+// --- Бекенд API --------------------------------------------------------------------------------
 
 static void be_snapshot(void *ctx, api_snapshot_t *o)
 {
@@ -348,8 +348,8 @@ static int be_log_read(void *ctx, uint32_t before, hl_record_t *out, size_t max,
     return n;
 }
 
-// The emulator listens on 127.0.0.1 only, so a request never arrives at the pending address and the
-// change stays pending; the page then reports that the new address is unreachable.
+// Емулятор слухає лише 127.0.0.1, тож запит ніколи не приходить на нову адресу, і
+// зміна лишається в очікуванні; сторінка тоді повідомляє, що нова адреса недоступна.
 static void be_net_prepare(void *ctx, const netcfg_t *cfg)
 {
     (void)ctx;
@@ -408,11 +408,11 @@ static void net_apply(const netcfg_t *cfg)
     pthread_mutex_unlock(&g_lock);
 }
 
-// --- Bridge emulation ---------------------------------------------------------------------------
+// --- Емуляція моста ---------------------------------------------------------------------------
 
 static http_parser_t g_parser;
 static int g_clients[MAX_CLIENTS];
-static int g_reply_to = -1; // direct mode: client whose bytes completed the request
+static int g_reply_to = -1; // прямий режим: клієнт, чиї байти завершили запит
 
 static void drop_client(int i)
 {
@@ -421,18 +421,18 @@ static void drop_client(int i)
     pthread_mutex_lock(&g_lock);
     bool none_left = --g_nclients == 0;
     pthread_mutex_unlock(&g_lock);
-    // Like the module's LINK pin: only "no TCP connection at all" is visible, so reset then.
+    // Як пін LINK модуля: видно лише стан "жодного TCP-з'єднання", тож тоді скидаємо.
     if (none_left) {
         http_parser_reset(&g_parser);
     }
 }
 
-// UART TX: throttled to the configured baud, then copied to every TCP client.
+// UART TX: обмежено заданою швидкістю (baud), потім копіюється кожному TCP-клієнту.
 static int bridge_write(void *ctx, const void *data, size_t len)
 {
     (void)ctx;
     const uint8_t *p = data;
-    size_t chunk = g_opt.baud ? (size_t)g_opt.baud / 10 / 50 : len; // 20 ms worth of bytes
+    size_t chunk = g_opt.baud ? (size_t)g_opt.baud / 10 / 50 : len; // байтів на 20 мс
     if (chunk == 0) {
         chunk = 1;
     }
@@ -458,8 +458,8 @@ static int bridge_write(void *ctx, const void *data, size_t len)
 static uint8_t g_page[64 * 1024];
 static size_t g_page_len;
 
-// Re-read on every page request so the UI can be edited live; keep the old copy if the file
-// is missing or would not fit, instead of serving an empty or truncated page.
+// Перечитується при кожному запиті сторінки, щоб UI можна було правити наживо; лишити стару копію, якщо файл
+// відсутній або не влазить, замість віддавати порожню чи обрізану сторінку.
 static bool load_page(void)
 {
     static uint8_t tmp[sizeof(g_page) + 1];
@@ -526,7 +526,7 @@ static void load_settings(void)
         printf("[boot] zero%d: %s%s\n", ch, o == ST_LOADED ? "loaded" : o == ST_CORRUPT ? "CORRUPT, defaults" : "missing",
                z.set ? " (set)" : "");
     }
-    // Boot counter for the session id; a raw u16 is enough here.
+    // Лічильник завантажень для id сесії; тут вистачить сирого u16.
     uint16_t boot = 0;
     n = kv_get("boot", buf, sizeof(buf));
     if (n == 2) {
@@ -663,7 +663,7 @@ int main(int argc, char **argv)
                 drop_client(i);
                 continue;
             }
-            // Merged stream: the parser cannot tell which client sent these bytes.
+            // Спільний потік: парсер не може знати, який клієнт надіслав ці байти.
             size_t off = 0;
             while (off < (size_t)got) {
                 http_event_t ev;

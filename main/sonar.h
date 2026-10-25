@@ -1,15 +1,15 @@
 #pragma once
-// HC-SR04: TRIG pulse, ECHO edges timestamped in a GPIO interrupt. Non-blocking: trigger, then
-// collect the result on a later cycle (at least SONAR_CYCLE_MS later).
+// HC-SR04: імпульс TRIG, фронти ECHO отримують мітку часу в перериванні GPIO. Без блокування: запуск, а
+// результат забираємо в одному з наступних циклів (не раніше ніж через SONAR_CYCLE_MS).
 #include <stdbool.h>
 
 #include "stand.h"
 
-#define SONAR_CYCLE_MS 100 // datasheet asks for >= 60 ms between measurements
+#define SONAR_CYCLE_MS 100 // за datasheet між вимірюваннями має бути >= 60 ms
 #define SONAR_MIN_CM   2.0f
 #define SONAR_MAX_CM   400.0f
 
 bool sonar_init(void);
 void sonar_trigger(void);
-// Result of the last trigger; *cm is set only on SS_OK.
+// Результат останнього запуску; *cm записується лише при SS_OK.
 sensor_status_t sonar_collect(float *cm);

@@ -1,4 +1,4 @@
-// Logger task: appends a history record every interval and runs log clears.
+// Задача журналу: щоінтервалу додає запис у журнал і виконує його очищення.
 #include "app.h"
 #include "esp_log.h"
 
@@ -10,7 +10,7 @@ static void run_clear(void)
     int err = histlog_clear(&g_app.log);
     if (err) {
         ESP_LOGE(TAG, "clear failed (%d), rescanning", err);
-        uint32_t errors = g_app.log.write_errors; // open() resets the counters; keep the history
+        uint32_t errors = g_app.log.write_errors; // open() скидає лічильники; зберегти накопичене
         histlog_open(&g_app.log, &g_app.flash_ops, g_app.log.n_sectors);
         g_app.log.write_errors = errors;
         g_app.log.last_error = err;
@@ -49,7 +49,7 @@ void task_logger(void *arg)
         uint32_t period = (uint32_t)cfg.interval_s * 1000u;
         uint32_t now = app_now_ms();
         if (changed) {
-            next = now + period; // a new interval starts when it is set
+            next = now + period; // новий інтервал діє з моменту встановлення
         }
         if ((int32_t)(now - next) >= 0) {
             if (cfg.enabled) {
@@ -64,7 +64,7 @@ void task_logger(void *arg)
                 app_refresh_log_stats();
                 xSemaphoreGive(g_app.log_lock);
             }
-            next += period; // from the previous deadline, so intervals do not drift
+            next += period; // від попереднього терміну, щоб інтервали не зсувалися
             if ((int32_t)(next - now) <= 0) {
                 next = now + period;
             }

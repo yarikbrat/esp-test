@@ -1,5 +1,5 @@
-// Bridge task: HTTP over the UART of the UART TO ETH module. All TCP clients share one byte stream,
-// and the module copies every reply to all of them; see docs/uart-to-eth-b.md.
+// Задача мосту: HTTP через UART модуля UART TO ETH. Усі TCP-клієнти ділять один потік байтів,
+// і модуль копіює кожну відповідь усім; див. docs/uart-to-eth-b.md.
 #include "app.h"
 #include "board.h"
 #include "driver/uart.h"
@@ -14,7 +14,7 @@ static const char *TAG = "bridge";
 static http_parser_t s_parser;
 static char s_scratch[8192];
 
-// One log line with the start of a dropped request, non-printable bytes as \xNN.
+// Один рядок логу з початком відкинутого запиту, недруковані байти як \xNN.
 static void log_drop(const char *what)
 {
     char line[4 * HTTP_DROP_SNIPPET + 1];

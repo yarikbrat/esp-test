@@ -1,4 +1,4 @@
-// Sensor task: barometers at 20 Hz, HC-SR04 every SONAR_CYCLE_MS.
+// Задача датчиків: барометри з частотою 20 Hz, HC-SR04 кожні SONAR_CYCLE_MS.
 #include <math.h>
 
 #include "app.h"

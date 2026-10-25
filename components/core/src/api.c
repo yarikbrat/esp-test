@@ -83,8 +83,8 @@ static const char *cal_text(const baro_t *b)
     }
 }
 
-// X-Req-Id of the request being answered. The module copies every reply to all TCP connections, so the
-// page compares this echo with its own id to spot replies meant for another tab. api_handle runs in one task.
+// X-Req-Id запиту, на який відповідаємо. Модуль копіює кожну відповідь у всі TCP-з'єднання, тож
+// сторінка звіряє цей відгук зі своїм id, щоб відсіяти відповіді іншій вкладці. api_handle працює в одній задачі.
 static char s_rid_header[HTTP_MAX_RID + 16];
 
 static int send(const api_out_t *out, int status, const char *ctype, const void *body, size_t len,
@@ -93,7 +93,7 @@ static int send(const api_out_t *out, int status, const char *ctype, const void 
     char head[320], hdrs[96];
     int hl = snprintf(hdrs, sizeof(hdrs), "%s%s", extra ? extra : "", s_rid_header);
     if (hl < 0 || (size_t)hl >= sizeof(hdrs)) {
-        return -1; // a header cut mid-line would desync every client on the shared stream
+        return -1; // заголовок, обрізаний посеред рядка, розсинхронізує всіх клієнтів у спільному потоці
     }
     size_t n = http_format_head(head, sizeof(head), status, ctype, len, hdrs[0] ? hdrs : NULL);
     if (n == 0) {
@@ -116,7 +116,7 @@ static void send_json(const api_out_t *out, int status, jw_t *w, bool head_only)
     send(out, status, "application/json; charset=utf-8", w->buf, w->len, NULL, head_only);
 }
 
-// head_only must follow the request: a body sent to a HEAD client desyncs the shared stream.
+// head_only має відповідати запиту: тіло, надіслане HEAD-клієнту, розсинхронізує спільний потік.
 static void send_fail_h(const api_out_t *out, bool head_only, int status, const char *code,
                         const char *msg, char *scratch, size_t cap)
 {
@@ -130,7 +130,7 @@ static void send_fail_h(const api_out_t *out, bool head_only, int status, const 
     send_json(out, status, &w, head_only);
 }
 
-// POST-only handlers: the request can never be HEAD here.
+// Обробники лише для POST: тут запит ніколи не буває HEAD.
 static void send_fail(const api_out_t *out, int status, const char *code, const char *msg,
                       char *scratch, size_t cap)
 {
@@ -147,7 +147,7 @@ static void send_ok(const api_out_t *out, const char *msg, char *scratch, size_t
     send_json(out, 200, &w, false);
 }
 
-// Address 0 is rendered as null (used for "no gateway").
+// Адреса 0 виводиться як null (означає "без шлюзу").
 static void json_ip(jw_t *w, const char *key, uint32_t a)
 {
     jw_printf(w, "\"%s\":", key);
@@ -172,7 +172,7 @@ static void json_chan_common(jw_t *w, const chan_t *c, uint32_t stale_ms, uint32
     jw_bool(w, fresh);
     jw_printf(w, ",\"%s\":", unit_key);
     jw_num(w, fresh ? c->value * scale : NAN, decimals);
-    jw_printf(w, ",\"last_%s\":", unit_key); // last valid value, shown as stale by the UI
+    jw_printf(w, ",\"last_%s\":", unit_key); // останнє дійсне значення, UI показує його як застаріле
     jw_num(w, c->ever_ok ? c->value * scale : NAN, decimals);
     jw_raw(w, ",\"age_ms\":");
     if (c->ever_ok) {
@@ -183,7 +183,7 @@ static void json_chan_common(jw_t *w, const chan_t *c, uint32_t stale_ms, uint32
     jw_printf(w, ",\"errors\":%u", (unsigned)c->errors);
 }
 
-// Open pages that polled recently, by X-Client-Id. Two or more means replies get mixed (see send()).
+// Відкриті сторінки, що нещодавно опитували, за X-Client-Id. Дві й більше — відповіді змішуються (див. send()).
 #define API_CLIENTS_MAX    4
 #define API_CLIENT_TTL_MS  3000
 static struct {
@@ -201,7 +201,7 @@ static unsigned note_client(const char *id, uint32_t now)
                 break;
             }
             if (now - s_clients[i].seen_ms > now - s_clients[slot].seen_ms || !s_clients[i].id[0]) {
-                slot = i; // otherwise reuse the stalest entry
+                slot = i; // інакше перевикористати найстаріший запис
             }
         }
         strcpy(s_clients[slot].id, id);
@@ -410,7 +410,7 @@ api_after_t api_handle(const api_backend_t *b, const http_request_t *req, const 
         send_json(out, 200, &w, head_only);
         return after;
     }
-    // Remaining routes are POST-only; anything else is 405 for a known path, 404 otherwise.
+    // Решта маршрутів лише POST; інше — 405 для відомого шляху, інакше 404.
     static const char *const post_routes[] = {"/api/zero", "/api/zero/reset", "/api/log/config",
                                               "/api/log/clear", "/api/net", "/api/net/commit",
                                               "/api/net/cancel"};
@@ -487,8 +487,8 @@ api_after_t api_handle(const api_backend_t *b, const http_request_t *req, const 
             send_fail(out, 409, "no_pending", "Немає змін мережі, що очікують застосування", scratch, cap);
         }
     } else if (strcmp(path, "/api/net/commit") == 0) {
-        // Sent by the page once it reached the new address; arriving there proves the module moved. When the
-        // IP stays the same (mask or gateway only) the address proves nothing, so the page's request suffices.
+        // Сторінка шле це, коли дісталася нової адреси; прихід туди доводить, що модуль переїхав. Коли
+        // IP не змінюється (лише маска чи шлюз), адреса нічого не доводить, тож досить запиту сторінки.
         netcfg_t pending;
         api_snapshot_t snap;
         b->snapshot(b->ctx, &snap);
@@ -516,13 +516,13 @@ api_after_t api_handle(const api_backend_t *b, const http_request_t *req, const 
             send_fail(out, 422, netcfg_err_code(err), netcfg_err_text(err), scratch, cap);
             return after;
         }
-        // The page sends module_form to the module itself; this ESP32 cannot reach its configurator.
+        // Сторінка сама надсилає module_form модулю; цей ESP32 не може дістатися його конфігуратора.
         char form[400], url[40], mod_url[40], mod_host[16];
         if (!uart_eth_form(&cfg, form, sizeof(form))) {
             send_fail(out, 500, "internal", "Внутрішня помилка", scratch, cap);
             return after;
         }
-        if (b->net_prepare) { // only once the reply can be built, so nothing is left pending on failure
+        if (b->net_prepare) { // лише коли відповідь можна зібрати, щоб при збої нічого не зависло в очікуванні
             b->net_prepare(b->ctx, &cfg);
         }
         netcfg_format_ipv4(cfg.ip, ip, sizeof(ip));
@@ -533,7 +533,7 @@ api_after_t api_handle(const api_backend_t *b, const http_request_t *req, const 
         }
         api_snapshot_t snap;
         b->snapshot(b->ctx, &snap);
-        // Where the browser reached us, else the active address.
+        // Адреса, за якою нас знайшов браузер, інакше активна.
         netcfg_format_ipv4(host_is_ip ? host_ip : snap.net.ip, mod_host, sizeof(mod_host));
         snprintf(mod_url, sizeof(mod_url), "http://%s:%u/", mod_host, (unsigned)UART_ETH_WEB_PORT);
         jw_t w;
@@ -545,7 +545,7 @@ api_after_t api_handle(const api_backend_t *b, const http_request_t *req, const 
         jw_raw(&w, ",\"module_url\":");
         jw_str(&w, mod_url);
         jw_raw(&w, ",\"same_ip\":");
-        jw_bool(&w, cfg.ip == snap.net.ip); // mask or gateway only: the page commits right away
+        jw_bool(&w, cfg.ip == snap.net.ip); // лише маска чи шлюз: сторінка фіксує одразу
         jw_raw(&w, ",\"module_form\":");
         jw_str(&w, form);
         jw_raw(&w, "}");
@@ -558,7 +558,7 @@ api_after_t api_handle(const api_backend_t *b, const http_request_t *req, const 
 
 void api_send_error(const api_out_t *out, int status, bool head_only, const char *rid, char *scratch, size_t cap)
 {
-    // Headers are parsed before the request line, so the id is known for most rejected requests.
+    // Заголовки розбираються раніше за рядок запиту, тож id відомий для більшості відхилених запитів.
     if (rid && rid[0]) {
         snprintf(s_rid_header, sizeof(s_rid_header), "X-Req-Id: %s\r\n", rid);
     } else {

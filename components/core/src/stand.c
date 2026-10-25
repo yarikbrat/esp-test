@@ -51,7 +51,7 @@ stand_event_t stand_baro_sample(stand_t *s, int ch, sensor_status_t st, float p_
     baro_t *b = &s->baro[ch];
     bool ok = st == SS_OK && baro_pressure_plausible(p_pa);
     if (ok) {
-        // After an outage the window restarts, so pre-outage samples never mix with new ones.
+        // Після збою вікно починається заново, тож старі виміри не змішуються з новими.
         if (!stand_chan_fresh(&b->c, STAND_BARO_STALE_MS, now_ms)) {
             b->avg_n = 0;
             b->avg_pos = 0;
@@ -61,7 +61,7 @@ stand_event_t stand_baro_sample(stand_t *s, int ch, sensor_status_t st, float p_
         if (b->avg_n < STAND_BARO_AVG_N) {
             b->avg_n++;
         }
-        double sum = 0; // recomputed each time, so rounding never accumulates
+        double sum = 0; // перераховується щоразу, тож похибка округлення не накопичується
         for (int i = 0; i < b->avg_n; i++) {
             sum += b->avg_win[i];
         }
@@ -87,7 +87,7 @@ static float median(const float *v, int n)
 {
     float t[STAND_SONAR_MEDIAN];
     memcpy(t, v, sizeof(float) * (size_t)n);
-    for (int i = 1; i < n; i++) { // insertion sort, n <= 5
+    for (int i = 1; i < n; i++) { // сортування вставками, n <= 5
         float x = t[i];
         int j = i - 1;
         while (j >= 0 && t[j] > x) {
@@ -104,7 +104,7 @@ void stand_sonar_sample(stand_t *s, sensor_status_t st, float cm, uint32_t now_m
     if (st != SS_OK || !isfinite(cm)) {
         s->sonar.status = st == SS_OK ? SS_OUT_OF_RANGE : st;
         s->sonar.errors++;
-        // A long outage must not let pre-outage samples dominate the median afterwards.
+        // Після довгого збою старі виміри не повинні переважати в медіані.
         if (!stand_chan_fresh(&s->sonar, STAND_SONAR_STALE_MS, now_ms)) {
             s->sonar_win_n = 0;
             s->sonar_win_pos = 0;

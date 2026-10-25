@@ -149,11 +149,11 @@ a{color:var(--acc)}
 const $ = (s, r = document) => r.querySelector(s);
 const MINUS = "−";
 
-// One request in flight at a time: the UART bridge serialises everything anyway.
-// Every request carries an id that the stand echoes back. The module copies each reply to all TCP
-// connections, so a reply with someone else's id means another tab or computer is talking to the stand.
+// Одночасно виконується лише один запит: міст UART і так обробляє все послідовно.
+// Кожен запит несе id, який стенд повертає у відповіді. Модуль копіює кожну відповідь в усі TCP-
+// з'єднання, тож відповідь із чужим id означає, що зі стендом працює інша вкладка чи комп'ютер.
 let chain = Promise.resolve(), ridSeq = Math.floor(Math.random() * 1e6), crossTalkAt = 0;
-const clientId = Math.random().toString(36).slice(2, 12) || "page"; // lets the stand count open pages
+const clientId = Math.random().toString(36).slice(2, 12) || "page"; // дає стенду порахувати відкриті сторінки
 function api(method, path, body) {
   const run = async () => {
     const ctl = new AbortController();
@@ -167,7 +167,7 @@ function api(method, path, body) {
       }
       const r = await fetch(path, opt);
       const got = r.headers.get("X-Req-Id");
-      // Error replies carry the id too, except 431 (headers never parsed): an id-less error is ours.
+      // Відповіді з помилкою теж містять id, крім 431 (заголовки не розібрано): помилка без id — наша.
       if (got !== rid && !(got === null && r.status >= 400)) {
         crossTalkAt = Date.now();
         return { ok: false, status: r.status, data: null, crossTalk: true };
@@ -241,7 +241,7 @@ function renderBaro(b, ch) {
   $('[data-act="zero"]', box).disabled = running;
   $('[data-act="reset"]', box).disabled = running || !b.zero_set;
   const m = $('[data-k="msg"]', box);
-  // Any page that sees a calibration running reports its result, not only the page that started it.
+  // Результат калібрування показує кожна сторінка, яка бачить, що воно йде, а не лише та, що його запустила.
   if (running) { box.dataset.waiting = "1"; setMsg(m, "Калібрування… збираємо вимірювання (1–3 с)", "warn"); }
   else if (box.dataset.waiting === "1" && b.cal_text) {
     box.dataset.waiting = "";
@@ -283,18 +283,18 @@ function renderNet(n) {
   if (!netFormTouched) { $("#fIp").value = n.ip; $("#fMask").value = n.mask; $("#fGw").value = n.gw || ""; }
   if (n.apply === "failed" && n.apply_msg) setMsg($("#netMsg"), n.apply_msg, "bad");
   $("#netPending").hidden = n.apply !== "pending" || netBusy;
-  // After BOOT the ESP32 is back on the default address while the module still answers on the old one.
+  // Після BOOT ESP32 повертається на адресу за замовчуванням, а модуль досі відповідає на старій.
   const host = location.hostname, mm = $("#netMismatch");
   mm.hidden = n.apply === "pending" || netBusy || !IP_RE.test(host) || host.startsWith("127.") || host === n.ip;
   if (!mm.hidden && mm.dataset.key !== host + ">" + n.ip) {
-    mm.dataset.key = host + ">" + n.ip; // rebuild only on change, so a link being clicked is not replaced
+    mm.dataset.key = host + ">" + n.ip; // перебудовувати лише при зміні, щоб не замінити посилання саме під час кліку
     const link = url => { const a = document.createElement("a"); a.href = a.textContent = url; a.target = "_blank"; a.rel = "noopener"; return a; };
     mm.replaceChildren("ESP32 налаштована на адресу " + n.ip + ", а модуль Ethernet відповідає за адресою " + host +
       ". Так буває після утримання BOOT: відкрийте ", link("http://" + host + ":8000/"), " (пароль порожній, Login), поставте Device IP " +
       n.ip + " і натисніть Submit, потім відкрийте ", link("http://" + n.ip + "/"), ".");
   }
   $("#netPendIp").textContent = n.pending_ip || "";
-  // A new IP can only be confirmed from a page opened at that IP; same IP (mask or gateway) from any page.
+  // Новий IP можна підтвердити лише зі сторінки, відкритої за цим IP; той самий IP (маска чи шлюз) — з будь-якої сторінки.
   const canConfirm = n.pending_ip === n.ip || n.pending_ip === location.hostname;
   $("#netConfirm").hidden = !canConfirm;
   $("#netPendHint").textContent = canConfirm
@@ -324,7 +324,7 @@ function renderLink() {
   if (!ok && last) document.querySelectorAll(".big").forEach(b => b.classList.add("stale"));
 }
 
-let netBusy = false; // polling pauses while the page moves the module to a new address
+let netBusy = false; // опитування на паузі, поки сторінка переносить модуль на нову адресу
 async function poll() {
   const started = Date.now();
   const res = netBusy ? { ok: false } : await api("GET", "/api/state");
@@ -365,9 +365,9 @@ let olderBefore = null;
 function cell(tr, text, cls) { const td = document.createElement("td"); td.textContent = text; if (cls) td.className = cls; tr.appendChild(td); }
 let logLoading = false;
 async function loadLog(append) {
-  if (logLoading) return; // a second click would reuse the same page cursor
+  if (logLoading) return; // другий клік повторно використав би той самий курсор сторінки
   logLoading = true;
-  logGen++; // a live update still in flight must not touch the new table
+  logGen++; // живе оновлення, яке ще виконується, не повинне чіпати нову таблицю
   $("#logLoad").disabled = $("#logOlder").disabled = true;
   try { await loadLogPage(append); }
   finally { logLoading = false; $("#logLoad").disabled = false; $("#logOlder").disabled = olderBefore === null; }
@@ -375,7 +375,7 @@ async function loadLog(append) {
 async function loadLogPage(append) {
   const m = $("#logMsg");
   let cursor = append ? olderBefore : null, res;
-  // A page can come back empty across a run of gaps; follow the cursor a few pages further.
+  // Сторінка може прийти порожньою через низку пропусків; пройти за курсором ще кілька сторінок.
   for (let hops = 0; hops < 10; hops++) {
     res = await api("GET", "/api/log" + (cursor !== null ? "?before=" + cursor : ""));
     if (!res.ok || res.data.records.length || res.data.next_before === null) break;
@@ -388,7 +388,7 @@ async function loadLogPage(append) {
   $("#logTable").hidden = tb.children.length === 0;
   olderBefore = res.data.next_before;
   if (!append) { logLive = true; logTop = res.data.records.length ? res.data.records[0].seq : -1; }
-  else logLive = false; // older pages are being browsed; keep the table still
+  else logLive = false; // переглядаються старіші сторінки; таблицю не оновлювати
   renderLogMode();
   if (!tb.children.length) setMsg(m, emptyLogText(), "mute");
 }
@@ -408,7 +408,7 @@ function emptyLogText() {
   return "Записів поки немає. Перший запис з'явиться через " + l.interval_s + " с після збереження налаштувань.";
 }
 
-// Shows which view of the history is on screen: the live newest records or older pages.
+// Показує, яка частина журналу на екрані: живі найновіші записи чи старіші сторінки.
 function renderLogMode() {
   const shown = !$("#logTable").hidden, mode = $("#logMode");
   $("#logLoad").setAttribute("aria-pressed", String(shown && logLive));
@@ -418,7 +418,7 @@ function renderLogMode() {
     : "Показано також старіші записи, нові не додаються. Щоб повернутися, натисніть «Показати останні записи».";
 }
 
-// While the newest page is shown, new records are prepended as the logger writes them.
+// Поки показано найновішу сторінку, нові записи додаються зверху, щойно задача журналу їх запише.
 const LOG_LIVE_ROWS = 100;
 let logLive = false, logTop = -1, logLiveAt = 0, logGen = 0, logTicking = false;
 async function logLiveTick() {
@@ -430,13 +430,13 @@ async function logLiveTick() {
   const gen = logGen;
   try {
     const res = await api("GET", "/api/log?limit=5");
-    if (!res.ok || !logLive || gen !== logGen) return; // busy, or a click or a clear replaced the table
+    if (!res.ok || !logLive || gen !== logGen) return; // зайнято, або клік чи очищення замінили таблицю
     const recs = res.data.records;
-    // Cleared from another page: every row on screen is older than the oldest live record.
+    // Очищено з іншої сторінки: кожен рядок на екрані старіший за найстаріший живий запис.
     if (logTop >= 0 && res.data.oldest > logTop) { loadLog(false); return; }
     const fresh = recs.filter(r => r.seq > logTop);
     if (!fresh.length) return;
-    if (fresh.length === recs.length && logTop >= 0) { loadLog(false); return; } // missed some
+    if (fresh.length === recs.length && logTop >= 0) { loadLog(false); return; } // частину пропущено
     const tb = $("#logTable tbody");
     for (let i = fresh.length - 1; i >= 0; i--) tb.insertBefore(logRow(fresh[i]), tb.firstChild);
     logTop = fresh[0].seq;
@@ -487,11 +487,11 @@ $("#netForm").addEventListener("submit", async ev => {
   try { await applyNet(ip, mask, gw, m); } finally { btn.disabled = false; netBusy = false; }
 });
 
-// Plain cross-origin POST: the module's configurator sends no CORS headers, so the reply stays opaque.
+// Простий cross-origin POST: конфігуратор модуля не надсилає заголовків CORS, тож відповідь лишається непрозорою (opaque).
 async function postNoCors(url, body) {
   const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 5000);
   try { await fetch(url, { method: "POST", mode: "no-cors", body: new URLSearchParams(body), signal: ctl.signal }); }
-  catch (e) { /* the module may drop the connection while it switches address */ }
+  catch (e) { /* модуль може розірвати з'єднання, поки змінює адресу */ }
   finally { clearTimeout(timer); }
 }
 async function reachable(url) {
@@ -502,21 +502,21 @@ async function reachable(url) {
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-// 1) the ESP32 validates and keeps the settings pending; 2) the page sends them to the module's own
-// configurator; 3) POST /api/net/commit at the new address makes the ESP32 store them as active.
-// A page opened at the pending address proves the module moved there, so it commits the change.
-// Not when the address stays the same: then only the page that sent the module form commits, or the user
-// presses "Підтвердити".
+// 1) ESP32 перевіряє налаштування й тримає їх в очікуванні; 2) сторінка надсилає їх у власний
+// конфігуратор модуля; 3) POST /api/net/commit за новою адресою змушує ESP32 зберегти їх як активні.
+// Сторінка, відкрита за адресою в очікуванні, доводить, що модуль туди перейшов, тож вона підтверджує зміну.
+// Крім випадку, коли адреса не змінюється: тоді підтверджує лише сторінка, що надіслала форму модулю, або користувач
+// натискає "Підтвердити".
 let commitAt = 0;
 async function maybeCommitNet(n) {
   if (netBusy || n.apply !== "pending" || n.pending_ip !== location.hostname || n.ip === location.hostname) return;
   if (Date.now() - commitAt < 5000) return;
   commitAt = Date.now();
   const res = await api("POST", "/api/net/commit");
-  if (!res.ok && res.data && res.data.error === "no_pending") return; // another page committed first
+  if (!res.ok && res.data && res.data.error === "no_pending") return; // інша сторінка підтвердила першою
   setMsg($("#netMsg"), msgOf(res, res.ok ? "Нові мережеві налаштування збережено" : "Не вдалося зберегти"), res.ok ? "ok" : "bad");
 }
-// Both buttons stay disabled until the reply, so a double click cannot overwrite the first result.
+// Обидві кнопки вимкнені до відповіді, щоб подвійний клік не перезаписав перший результат.
 async function pendingAction(path, okText, badText) {
   const btns = [$("#netConfirm"), $("#netCancel")];
   if (btns.some(b => b.disabled)) return;
@@ -536,11 +536,11 @@ async function applyNet(ip, mask, gw, m) {
   if (!res.ok) { setMsg(m, msgOf(res, "Налаштування не прийнято"), "bad"); return; }
   netFormTouched = false;
   netBusy = true;
-  await chain; // nothing else may talk to the stand while the module switches
+  await chain; // поки модуль перемикається, ніщо інше не повинно звертатися до стенда
   setMsg(m, "Налаштовуємо модуль Ethernet…", "warn");
   await postNoCors(res.data.module_url + "ip_en.html", "lgk=&post=Login");
   await postNoCors(res.data.module_url + "ok.html", res.data.module_form);
-  if (res.data.same_ip) { // mask or gateway only: the page stays where it is
+  if (res.data.same_ip) { // лише маска чи шлюз: сторінка лишається на місці
     await sleep(1000);
     const c = await api("POST", "/api/net/commit");
     setMsg(m, msgOf(c, c.ok ? "Нові мережеві налаштування збережено" : "Не вдалося зберегти"), c.ok ? "ok" : "bad");

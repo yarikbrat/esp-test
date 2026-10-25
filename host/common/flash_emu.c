@@ -1,4 +1,4 @@
-#define _GNU_SOURCE // pread/pwrite under -std=c11
+#define _GNU_SOURCE // pread/pwrite при -std=c11
 #include "flash_emu.h"
 
 #include <fcntl.h>
@@ -7,7 +7,7 @@
 #include <string.h>
 #include <unistd.h>
 
-// Writes back only the touched range, so a 32-byte append costs 32 bytes of file I/O.
+// Записує назад лише змінений діапазон, тож додавання 32 байтів коштує 32 байти файлового I/O.
 static void persist(flash_emu_t *fe, uint32_t off, uint32_t len)
 {
     if (fe->fd < 0) {
@@ -35,7 +35,7 @@ void flash_emu_init(flash_emu_t *fe, uint32_t size, uint32_t sector_size, const 
         } else {
             ssize_t got = pread(fe->fd, fe->mem, size, 0);
             if (got >= 0 && got < (ssize_t)size) {
-                persist(fe, 0, size); // new or short file: write out the erased image once
+                persist(fe, 0, size); // новий або закороткий файл: один раз записати стерте зображення
             }
         }
     }
@@ -79,7 +79,7 @@ static int emu_write(void *ctx, uint32_t off, const void *src, uint32_t len)
     }
     const uint8_t *s = src;
     for (uint32_t i = 0; i < n; i++) {
-        fe->mem[off + i] &= s[i]; // NOR: bits only go 1 -> 0
+        fe->mem[off + i] &= s[i]; // NOR: біти змінюються лише 1 -> 0
     }
     persist(fe, off, n);
     return ret;

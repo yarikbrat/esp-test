@@ -42,7 +42,7 @@ void test_netcfg(void)
     CHECK_EQ_INT(netcfg_from_strings("192.168.1.10", "255.255.255.0", "", &out), NETCFG_OK);
     CHECK(out.gw == 0);
 
-    // Errors leave out untouched.
+    // Помилки не змінюють out.
     netcfg_t keep = out;
     CHECK_EQ_INT(netcfg_from_strings("192.168.1.300", "255.255.255.0", "", &out), NETCFG_ERR_IP_FORMAT);
     CHECK_EQ_INT(netcfg_from_strings("192.168.1.10", "255.255.0.255", "", &out), NETCFG_ERR_MASK_INVALID);
@@ -67,7 +67,7 @@ void test_netcfg(void)
     }
 }
 
-// Feeds s in chunk-sized pieces and collects events.
+// Подає s шматками розміру chunk і збирає події.
 typedef struct {
     int requests, errors;
     int last_status;
@@ -103,7 +103,7 @@ void test_http(void)
     const char *get = "GET /api/state?x=1 HTTP/1.1\r\nHost: 192.168.144.36\r\n"
                       "Accept-Encoding: gzip, deflate\r\n\r\n";
 
-    // Whole, byte-by-byte and 7-byte chunks must give the same result.
+    // Цілком, по байту і шматками по 7 байтів — результат має бути однаковим.
     size_t chunks[] = {4096, 1, 7};
     for (size_t i = 0; i < 3; i++) {
         http_parser_init(&p);
@@ -118,14 +118,14 @@ void test_http(void)
         CHECK(!http_parser_busy(&p));
     }
 
-    // Host: port is dropped, an absent or oversized Host gives "", and it never leaks into the next request.
+    // Host: порт відкидається, відсутній чи задовгий Host дає "", і він ніколи не потрапляє в наступний запит.
     http_parser_init(&p);
     feed_result_t fh = feed_str(&p, "GET / HTTP/1.1\r\nhost:  10.0.0.5:8080 \r\n\r\n", 4096, 0);
     CHECK(fh.requests == 1 && strcmp(fh.last.host, "10.0.0.5") == 0);
     fh = feed_str(&p, "GET / HTTP/1.1\r\n\r\n", 4096, 0);
     CHECK(fh.requests == 1 && fh.last.host[0] == '\0');
     fh = feed_str(&p, "GET / HTTP/1.1\r\nHost: [fe80::1]:80\r\n\r\n", 4096, 0);
-    CHECK(fh.requests == 1 && fh.last.host[0] == '\0'); // IPv6 literal is not cut into "["
+    CHECK(fh.requests == 1 && fh.last.host[0] == '\0'); // літерал IPv6 не обрізається до "["
     fh = feed_str(&p, "GET / HTTP/1.1\r\nHost: 10.0.0.1\r\nHost: 10.0.0.2\r\n\r\n", 4096, 0);
     CHECK(fh.requests == 1 && strcmp(fh.last.host, "10.0.0.1") == 0);
     char longhost[200] = "GET / HTTP/1.1\r\nHost: ";
@@ -134,14 +134,14 @@ void test_http(void)
     fh = feed_str(&p, longhost, 4096, 0);
     CHECK(fh.requests == 1 && fh.last.host[0] == '\0');
 
-    // A rejected request leaves its first bytes for the log, even though the parser reset its buffer.
+    // Відхилений запит лишає свої перші байти для журналу, хоча парсер скинув свій буфер.
     fh = feed_str(&p, "BREW /pot HTTP/1.1\r\n\r\n", 4096, 0);
     CHECK(fh.errors == 1 && p.drop_len > 0 && memcmp(p.drop, "BREW /pot", 9) == 0 && p.head_len == 0);
     http_parser_init(&p);
     fh = feed_str(&p, "GET /slow HT", 4096, 0);
     CHECK(http_parser_tick(&p, HTTP_IDLE_TIMEOUT_MS + 1) && memcmp(p.drop, "GET /slow HT", 12) == 0);
 
-    // X-Req-Id is echoed into a response header: only short alphanumeric values are kept.
+    // X-Req-Id повертається в заголовку відповіді: зберігаються лише короткі буквено-цифрові значення.
     fh = feed_str(&p, "GET / HTTP/1.1\r\nx-req-id: 42abc\r\n\r\n", 4096, 0);
     CHECK(fh.requests == 1 && strcmp(fh.last.rid, "42abc") == 0);
     fh = feed_str(&p, "GET / HTTP/1.1\r\nX-Req-Id: 4 2\r\n\r\n", 4096, 0);
@@ -153,7 +153,7 @@ void test_http(void)
     fh = feed_str(&p, "GET / HTTP/1.1\r\nX-Client-Id: k9Q\r\n\r\n", 4096, 0);
     CHECK(fh.requests == 1 && strcmp(fh.last.client, "k9Q") == 0 && fh.last.rid[0] == '\0');
 
-    // Two pipelined requests in one chunk, then a POST whose body is split.
+    // Два конвеєрні запити в одному шматку, потім POST із розділеним тілом.
     http_parser_init(&p);
     feed_result_t fr = feed_str(&p,
                                 "GET / HTTP/1.1\r\n\r\n"
@@ -173,7 +173,7 @@ void test_http(void)
     CHECK_EQ_INT(fr.requests, 1);
     CHECK(strcmp(fr.last.body, "ip=1.2.3.4") == 0);
 
-    // Junk that cannot start a method is skipped silently between requests.
+    // Сміття, яким не може починатися метод, тихо пропускається між запитами.
     http_parser_init(&p);
     fr = feed_str(&p, "\r\n\r\n\x01\xffgarbage\r\n\r\nGET /ok HTTP/1.1\r\n\r\n", 3, 0);
     CHECK_EQ_INT(fr.errors, 0);
@@ -181,7 +181,7 @@ void test_http(void)
     CHECK(strcmp(fr.last.path, "/ok") == 0);
     CHECK(p.stats.skipped_bytes == 9);
 
-    // Upper-case junk looks like a method: one error reply, then the next request parses.
+    // Сміття у верхньому регістрі схоже на метод: одна відповідь з помилкою, потім наступний запит розбирається.
     http_parser_init(&p);
     fr = feed_str(&p, "GARBAGE\r\n\r\nGET /ok HTTP/1.1\r\n\r\n", 3, 0);
     CHECK_EQ_INT(fr.errors, 1);
@@ -189,29 +189,29 @@ void test_http(void)
     CHECK_EQ_INT(fr.requests, 1);
     CHECK(strcmp(fr.last.path, "/ok") == 0);
 
-    // Noise with A-Z bytes glued in front of a request line: the request is recovered from the line.
+    // Шум з байтами A-Z, приліплений перед рядком запиту: запит відновлюється з рядка.
     http_parser_init(&p);
     fr = feed_str(&p, "\x01QZ\xff" "AGET /api/state HTTP/1.1\r\nX-Req-Id: 5\r\n\r\n", 4096, 0);
     CHECK(fr.requests == 1 && fr.errors == 0 && strcmp(fr.last.path, "/api/state") == 0);
     CHECK(strcmp(fr.last.rid, "5") == 0);
-    // Noise containing a newline: the real request is on the second line of the buffer.
+    // Шум із символом нового рядка: справжній запит у другому рядку буфера.
     http_parser_init(&p);
     fr = feed_str(&p, "\x02ZQ\nXGET /api/state HTTP/1.1\r\n\r\n", 4096, 0);
     CHECK(fr.requests == 1 && fr.errors == 0 && strcmp(fr.last.path, "/api/state") == 0);
-    // A valid request keeps its line even if a header mentions a method.
+    // Валідний запит зберігає свій рядок, навіть якщо заголовок згадує метод.
     fr = feed_str(&p, "GET /a HTTP/1.1\r\nX-Note: POST /b HTTP/1.1\r\n\r\n", 4096, 0);
     CHECK(fr.requests == 1 && strcmp(fr.last.path, "/a") == 0);
-    // A body that never arrives: the timeout keeps the head of the accepted request for the log.
+    // Тіло, яке так і не приходить: тайм-аут зберігає початок прийнятого запиту для журналу.
     http_parser_init(&p);
     fr = feed_str(&p, "POST /api/net HTTP/1.1\r\nContent-Length: 30\r\n\r\nip=1", 4096, 0);
     CHECK(http_parser_tick(&p, HTTP_IDLE_TIMEOUT_MS + 1) && p.drop_len > 0 && memcmp(p.drop, "POST /api/net", 13) == 0);
 
-    // A timeout while skipping a rejected body does not overwrite the rejected request's snippet with junk.
+    // Тайм-аут під час пропуску тіла відхиленого запиту не перезаписує фрагмент цього запиту сміттям.
     http_parser_init(&p);
     fr = feed_str(&p, "BREW /x HTTP/1.1\r\nContent-Length: 10\r\n\r\nab", 4096, 0);
     CHECK(fr.errors == 1 && p.drop_len > 0);
     CHECK(http_parser_tick(&p, HTTP_IDLE_TIMEOUT_MS + 1) && p.drop_len == 0);
-    // 431: headers never parsed, so the previous request's id must not be echoed.
+    // 431: заголовки не розібрано, тож id попереднього запиту не можна повертати.
     http_parser_init(&p);
     fr = feed_str(&p, "GET / HTTP/1.1\r\nX-Req-Id: 7\r\n\r\n", 4096, 0);
     CHECK(strcmp(p.req.rid, "7") == 0);
@@ -221,12 +221,12 @@ void test_http(void)
     fr = feed_str(&p, huge, 4096, 0);
     CHECK(fr.errors == 1 && fr.last_status == 431 && p.req.rid[0] == '\0');
 
-    // A clean unknown method is still reported, not mistaken for noise.
+    // Чистий невідомий метод все одно повідомляється, а не вважається шумом.
     http_parser_init(&p);
     fr = feed_str(&p, "PATCH /x HTTP/1.1\r\n\r\n", 4096, 0);
     CHECK(fr.errors == 1 && fr.last_status == 501);
 
-    // The 32 bytes UART TO ETH (B) writes to the UART after applying new settings, glued to a request.
+    // 32 байти, які UART TO ETH (B) пише в UART після застосування нових налаштувань, приліплені до запиту.
     static const uint8_t module_junk[] = {0x00, 0xff, 0x00, 0xff, 0x00, 0x00, 0x00, 0xfe, 0x00, 0xfe, 0x00,
                                           0x00, 0xff, 0x00, 0x00, 0x40, 0xff, 0x00, 0x00, 0xa0, 0xfd, 0x01,
                                           0x00, 0x00, 0x08, 0xa9, 0xff, 0x02, 0x00, 0x00, 0x00, 0x00};
@@ -240,7 +240,7 @@ void test_http(void)
     fr = feed_str(&p, "GET /api/state HTTP/1.1\r\n\r\n", 4096, 0);
     CHECK(fr.requests == 1 && fr.errors == 0 && strcmp(fr.last.path, "/api/state") == 0);
 
-    // Header overflow -> 431, skip to end of headers, then continue normally.
+    // Переповнення заголовків -> 431, пропуск до кінця заголовків, далі звичайна робота.
     http_parser_init(&p);
     char big[4000];
     strcpy(big, "GET / HTTP/1.1\r\nX-Pad: ");
@@ -253,7 +253,7 @@ void test_http(void)
     CHECK_EQ_INT(fr.requests, 1);
     CHECK(strcmp(fr.last.path, "/next") == 0);
 
-    // Boundary: a head of exactly HTTP_MAX_HEAD bytes is accepted.
+    // Межа: заголовкова частина рівно HTTP_MAX_HEAD байтів приймається.
     http_parser_init(&p);
     memset(big, 0, sizeof(big));
     strcpy(big, "GET / HTTP/1.1\r\nX-Pad: ");
@@ -266,7 +266,7 @@ void test_http(void)
     CHECK_EQ_INT(fr.errors, 0);
     CHECK_EQ_INT(fr.requests, 1);
 
-    // Oversized body -> 413, body skipped, next request parses.
+    // Завелике тіло -> 413, тіло пропускається, наступний запит розбирається.
     http_parser_init(&p);
     memset(big, 0, sizeof(big));
     strcpy(big, "POST /api/net HTTP/1.1\r\nContent-Length: 600\r\n\r\n");
@@ -279,7 +279,7 @@ void test_http(void)
     CHECK_EQ_INT(fr.requests, 1);
     CHECK(strcmp(fr.last.path, "/after") == 0);
 
-    // Unknown method with a body: 501, body is not parsed as a request.
+    // Невідомий метод із тілом: 501, тіло не розбирається як запит.
     http_parser_init(&p);
     fr = feed_str(&p, "PUT /x HTTP/1.1\r\nContent-Length: 18\r\n\r\nGET /evil HTTP/1.1"
                       "GET /good HTTP/1.1\r\n\r\n", 4096, 0);
@@ -288,7 +288,7 @@ void test_http(void)
     CHECK_EQ_INT(fr.requests, 1);
     CHECK(strcmp(fr.last.path, "/good") == 0);
 
-    // Request-line errors still skip a declared body: it must not be parsed as the next request.
+    // Помилки в рядку запиту все одно пропускають оголошене тіло: його не можна розбирати як наступний запит.
     http_parser_init(&p);
     fr = feed_str(&p, "POST /aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                       " HTTP/1.1\r\nContent-Length: 30\r\n\r\nGET /api/log/clear HTTP/1.1\r\n\r\n"
@@ -309,7 +309,7 @@ void test_http(void)
     CHECK_EQ_INT(fr.requests, 1);
     CHECK(strcmp(fr.last.path, "/real") == 0);
 
-    // A huge claimed length is rejected without swallowing the following requests.
+    // Величезна заявлена довжина відхиляється без поглинання наступних запитів.
     http_parser_init(&p);
     fr = feed_str(&p, "POST /api/net HTTP/1.1\r\nContent-Length: 999999999\r\n\r\n"
                       "GET /api/state HTTP/1.1\r\n\r\n", 4096, 0);
@@ -317,14 +317,14 @@ void test_http(void)
     CHECK_EQ_INT(fr.requests, 1);
     CHECK(strcmp(fr.last.path, "/api/state") == 0);
 
-    // HEAD is remembered for error replies, GET is not.
+    // HEAD запам'ятовується для відповідей з помилкою, GET — ні.
     http_parser_init(&p);
     feed_str(&p, "HEAD /x HTTP/9.9\r\n\r\n", 4096, 0);
     CHECK(p.error_head);
     feed_str(&p, "GET /x HTTP/9.9\r\n\r\n", 4096, 0);
     CHECK(!p.error_head);
 
-    // Conflicting Content-Length, chunked, bad version, bad length, long URI.
+    // Суперечливий Content-Length, chunked, погана версія, погана довжина, задовгий URI.
     http_parser_init(&p);
     fr = feed_str(&p, "POST / HTTP/1.1\r\nContent-Length: 3\r\nContent-Length: 4\r\n\r\n", 4096, 0);
     CHECK_EQ_INT(fr.last_status, 400);
@@ -341,7 +341,7 @@ void test_http(void)
     fr = feed_str(&p, "GET /aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa HTTP/1.1\r\n\r\n", 4096, 0);
     CHECK_EQ_INT(fr.last_status, 414);
 
-    // Idle timeout: a gap > 2 s drops the incomplete request.
+    // Тайм-аут простою: пауза > 2 с відкидає неповний запит.
     http_parser_init(&p);
     feed_str(&p, "GET /slow HT", 4096, 1000);
     CHECK(http_parser_busy(&p));
@@ -353,7 +353,7 @@ void test_http(void)
     CHECK_EQ_INT(fr.requests, 1);
     CHECK(strcmp(fr.last.path, "/fresh") == 0);
 
-    // Total timeout: bytes keep dripping but the request never completes within 5 s.
+    // Загальний тайм-аут: байти продовжують крапати, але запит не завершується за 5 с.
     http_parser_init(&p);
     feed_str(&p, "GET /drip", 4096, 0);
     uint32_t dropped_at = 0;
@@ -363,9 +363,9 @@ void test_http(void)
             dropped_at = t;
         }
     }
-    CHECK_EQ_INT(dropped_at, 6000); // first tick past 5 s
+    CHECK_EQ_INT(dropped_at, 6000); // перший тік після 5 с
 
-    // Response head.
+    // Заголовкова частина відповіді.
     char head[256];
     size_t n = http_format_head(head, sizeof(head), 200, "application/json", 17, "X-A: 1\r\n");
     CHECK(n > 0);
@@ -388,7 +388,7 @@ void test_form(void)
     CHECK(!form_get("a=%zz", "a", v, sizeof(v)));
     CHECK(!form_get("a=%4", "a", v, sizeof(v)));
     CHECK(!form_get("a=%00", "a", v, sizeof(v)));
-    CHECK(!form_get("a=123456", "a", v, 4)); // does not fit
+    CHECK(!form_get("a=123456", "a", v, 4)); // не влазить
     CHECK(form_get("flag", "flag", v, sizeof(v)) && v[0] == '\0');
 
     long n = 0;
@@ -401,7 +401,7 @@ void test_form(void)
     CHECK(n == 10);
 }
 
-// Deterministic fuzz under ASan: random bytes mixed with valid requests, random chunking.
+// Детермінований фазинг під ASan: випадкові байти впереміш із валідними запитами, випадкове дроблення.
 void test_http_fuzz(void)
 {
     static const char *frags[] = {"GET / HTTP/1.1\r\n\r\n", "POST /api/zero HTTP/1.1\r\nContent-Length: 4\r\n\r\nch=1",
@@ -438,7 +438,7 @@ void test_http_fuzz(void)
                 }
             }
             if (used == 0 && ev == HTTP_EV_NONE) {
-                g_failures++; // no progress would hang the net task
+                g_failures++; // відсутність прогресу повісила б мережеву задачу
                 break;
             }
             off += used;

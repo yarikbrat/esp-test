@@ -1,5 +1,5 @@
 #pragma once
-// CRC-32 (IEEE 802.3, reflected polynomial 0xEDB88320) for stored records.
+// CRC-32 (IEEE 802.3, віддзеркалений поліном 0xEDB88320) для збережених записів.
 #include <stddef.h>
 #include <stdint.h>
 

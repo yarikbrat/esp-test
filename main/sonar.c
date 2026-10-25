@@ -6,14 +6,14 @@
 #include "esp_rom_sys.h"
 #include "esp_timer.h"
 
-#define US_PER_CM 58.3f // round trip at 343 m/s
+#define US_PER_CM 58.3f // шлях туди й назад при 343 m/s
 
 static const char *TAG = "sonar";
 
 static volatile int64_t s_rise_us, s_fall_us;
 static volatile bool s_armed;
 
-// Not in IRAM: the ISR service is installed without ESP_INTR_FLAG_IRAM, so it is masked during flash writes.
+// Не в IRAM: сервіс ISR встановлено без ESP_INTR_FLAG_IRAM, тому під час запису у flash він замаскований.
 static void echo_isr(void *arg)
 {
     (void)arg;
@@ -36,7 +36,7 @@ bool sonar_init(void)
     gpio_config_t echo = {
         .pin_bit_mask = 1ULL << PIN_SONAR_ECHO,
         .mode = GPIO_MODE_INPUT,
-        .pull_down_en = GPIO_PULLDOWN_ENABLE, // an unconnected ECHO reads 0, not noise
+        .pull_down_en = GPIO_PULLDOWN_ENABLE, // непід'єднаний ECHO читається як 0, а не як шум
         .intr_type = GPIO_INTR_ANYEDGE,
     };
     gpio_set_level(PIN_SONAR_TRIG, 0);
@@ -47,7 +47,7 @@ bool sonar_init(void)
     if (err == ESP_OK) {
         err = gpio_install_isr_service(0);
         if (err == ESP_ERR_INVALID_STATE) {
-            err = ESP_OK; // already installed by someone else
+            err = ESP_OK; // вже встановлено кимось іншим
         }
     }
     if (err == ESP_OK) {
@@ -66,7 +66,7 @@ void sonar_trigger(void)
     s_rise_us = 0;
     s_fall_us = 0;
     if (gpio_get_level(PIN_SONAR_ECHO)) {
-        return; // ECHO still high from an earlier ping: collect reports no echo
+        return; // ECHO ще високий від попереднього імпульсу: збір результату повідомить, що відлуння немає
     }
     s_armed = true;
     gpio_set_level(PIN_SONAR_TRIG, 1);
