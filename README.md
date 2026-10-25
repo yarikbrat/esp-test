@@ -62,6 +62,21 @@ idf.py -p /dev/ttyUSB0 -b 460800 flash monitor
 
 Таблиця розділів `partitions.csv`: `nvs` 24 КБ, `factory` 1.5 МБ, `histlog` 256 КБ.
 
+### Прошивання з WSL (Windows)
+
+WSL не бачить USB-пристрої Windows напряму; плату передають у WSL утилітою
+[usbipd-win](https://github.com/dorssel/usbipd-win). Команди 1–3 — у PowerShell Windows, 4–5 — у WSL.
+
+1. Встановити usbipd-win: `winget install usbipd`.
+2. Знайти плату: `usbipd list` — рядок `USB-SERIAL CH340`, його BUSID (наприклад `4-9`).
+3. Один раз, від адміністратора: `usbipd bind --busid <BUSID>`. **Після кожного** перепідключення кабелю:
+   `usbipd attach --wsl --busid <BUSID>` (плата зникає з Windows як COM-порт і з'являється у WSL).
+4. Права на порт, один раз: `sudo usermod -aG dialout $USER`, потім перезапустити WSL (`wsl --shutdown` у Windows).
+   Або щоразу після `attach`: `sudo chmod a+rw /dev/ttyUSB0`.
+5. Перевірити: `ls /dev/ttyUSB0`, далі — команди збирання і прошивання вище.
+
+Щоб повернути плату у Windows: `usbipd detach --busid <BUSID>` або перепідключити кабель.
+
 ### Готова прошивка (без збирання)
 
 Каталог `firmware/` містить зібрані образи; версія і коміт — у `firmware/VERSION.txt`, контрольні суми —
