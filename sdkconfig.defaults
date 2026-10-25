@@ -3,7 +3,7 @@ CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
-# UART ISR must keep running while flash is erased by the history logger.
+# Обробник переривань UART має працювати, поки журнал стирає flash.
 CONFIG_UART_ISR_IN_IRAM=y
 CONFIG_FREERTOS_HZ=1000
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
