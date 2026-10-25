@@ -49,6 +49,8 @@
 - ESP-IDF **v5.5.6** (CMake, `idf.py`), ціль `esp32`. Встановлення:
   https://docs.espressif.com/projects/esp-idf/en/v5.5.6/esp32/get-started/index.html. Сторонніх бібліотек немає: драйвери BMP58x і HC-SR04,
   HTTP-сервер і журнал написані в проєкті. Регістри BMP58x — за Bosch BMP5_SensorAPI.
+- Мова C. Прошивка збирається компілятором GCC 14.2 з ESP-IDF у режимі `gnu17` (стандарт за замовчуванням ESP-IDF);
+  тести ядра на ПК — з `-std=c11`.
 - Для тестів на ПК: `gcc`, `make`, `python3`. Збирання перевірене в WSL2 (Ubuntu 24.04), прошивання — через
   `usbipd-win` 5.3.0.
 
