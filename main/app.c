@@ -18,7 +18,7 @@ extern const uint8_t page_gz_end[] asm("_binary_index_html_gz_end");
 
 uint32_t app_now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 
-static const char *zero_key(int ch) { return ch ? "zero1" : "zero0"; }
+const char *app_zero_key(int ch) { return ch ? "zero1" : "zero0"; }
 
 static const char *origin_text(st_origin_t o)
 {
@@ -46,7 +46,7 @@ void app_load_settings(void)
              g_app.log_cfg.enabled ? "on" : "off", g_app.log_cfg.interval_s);
     for (int ch = 0; ch < STAND_BARO_N; ch++) {
         zero_cfg_t z;
-        n = kv_get(zero_key(ch), buf, sizeof(buf));
+        n = kv_get(app_zero_key(ch), buf, sizeof(buf));
         st_origin_t o = st_decode_zero(n ? buf : NULL, n, (uint8_t)ch, &z);
         stand_load_zero(&g_app.stand, ch, &z, o);
         ESP_LOGI(TAG, "zero%d: %s%s", ch, origin_text(o), z.set ? ", set" : "");
@@ -71,27 +71,6 @@ void app_request_zero_persist(int ch)
         app_lock();
         stand_zero_persisted(&g_app.stand, ch, false);
         app_unlock();
-    }
-}
-
-// Єдине місце, що записує blob-и нулів. Воно зберігає значення каналу з RAM на момент запису, тож пізніше скидання
-// ніколи не буде перезаписане старішим результатом калібрування.
-void task_storage(void *arg)
-{
-    (void)arg;
-    for (;;) {
-        uint8_t ch;
-        xQueueReceive(g_app.persist_q, &ch, portMAX_DELAY);
-        app_lock();
-        zero_cfg_t z = g_app.stand.baro[ch].zero;
-        app_unlock();
-        uint8_t buf[ST_ZERO_BLOB_SIZE];
-        size_t n = st_encode_zero(&z, ch, buf, sizeof(buf));
-        bool ok = n && kv_set(zero_key(ch), buf, n);
-        app_lock();
-        stand_zero_persisted(&g_app.stand, ch, ok);
-        app_unlock();
-        ESP_LOGI(TAG, "zero%u %s, persist %s", ch, z.set ? "set" : "cleared", ok ? "ok" : "FAILED");
     }
 }
 

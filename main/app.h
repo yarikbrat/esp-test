@@ -56,6 +56,7 @@ static inline void app_unlock(void) { xSemaphoreGive(g_app.lock); }
 
 void app_load_settings(void);
 void app_request_zero_persist(int ch);
+const char *app_zero_key(int ch); // ключ NVS нуля каналу: "zero0" або "zero1"
 void app_refresh_log_stats(void); // викликати, утримуючи log_lock
 api_backend_t app_backend(void);
 void app_net_apply(const netcfg_t *cfg);

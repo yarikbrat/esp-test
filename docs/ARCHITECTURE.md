@@ -43,7 +43,7 @@
 | `main/sonar.c` | HC-SR04: імпульс `Trig`, фронти `Echo` у перериванні, неблокуюче вимірювання | `esp_driver_gpio`, `esp_timer` |
 | `main/kv.c` | NVS: один blob на ключ | `nvs_flash` |
 | `main/flash_part.c` | доступ журналу до розділу `histlog` | `esp_partition` |
-| `main/app.c` | спільний стан, бекенд API, збереження нулів (задача storage) | ядро |
+| `main/app.c` | спільний стан, завантаження налаштувань, бекенд API | ядро |
 | `main/task_*.c` | задачі FreeRTOS | |
 | `web/index.html` | сторінка, вбудовується в прошивку (і стиснута копія) | |
 

@@ -1,5 +1,6 @@
 idf_component_register(SRCS "main.c" "app.c" "kv.c" "flash_part.c" "bmp58x.c" "sonar.c"
                             "task_sensors.c" "task_logger.c" "task_bridge.c" "task_button.c"
+                            "task_storage.c"
                        INCLUDE_DIRS "."
                        REQUIRES core nvs_flash esp_partition esp_driver_uart esp_driver_i2c
                                 esp_driver_gpio esp_timer
